@@ -154,7 +154,7 @@ export default function HomePage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-lg font-semibold text-card-foreground">{party.data.name}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">Board coming soon</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Collaborative board ready</p>
                     </div>
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">
                       {role === 'dm' && <Crown className="size-3" aria-hidden />}
