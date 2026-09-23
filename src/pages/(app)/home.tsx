@@ -63,14 +63,15 @@ export default function HomePage() {
 
   async function createParty(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     setPending('create')
     try {
       const result = await callAction<{ partyId: string; joinCode: string }>('createParty', {
         name: String(form.get('name') ?? ''),
         password: String(form.get('password') ?? ''),
       })
-      event.currentTarget.reset()
+      formElement.reset()
       success('Party created', `Share code ${result.joinCode} and the password with your players.`)
     } catch (caught) {
       error('Could not create party', caught instanceof Error ? caught.message : undefined)
@@ -81,14 +82,15 @@ export default function HomePage() {
 
   async function joinParty(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     setPending('join')
     try {
       const result = await callAction<{ partyId: string; joined: boolean }>('joinParty', {
         joinCode: String(form.get('joinCode') ?? ''),
         password: String(form.get('password') ?? ''),
       })
-      event.currentTarget.reset()
+      formElement.reset()
       success(result.joined ? 'Joined party' : 'Already in party', 'Your party is ready when the board arrives.')
     } catch (caught) {
       error('Could not join party', caught instanceof Error ? caught.message : undefined)
