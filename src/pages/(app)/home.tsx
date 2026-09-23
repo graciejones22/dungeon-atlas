@@ -1,4 +1,5 @@
 import { type FormEvent, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { getAuthToken, useAuthProfileReady, useQuery } from 'deepspace'
 import { Crown, DoorOpen, Plus, Shield, Users } from 'lucide-react'
 import { Button, Input, Label, useToast } from '@/components/ui'
@@ -162,6 +163,12 @@ export default function HomePage() {
                     <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Party code</p>
                     <code className="mt-1 block select-all text-sm font-semibold tracking-[0.12em] text-foreground">{party.data.joinCode}</code>
                   </div>
+                  <Link
+                    to={`/parties/${party.data.partyId}`}
+                    className="mt-5 inline-flex text-sm font-medium text-primary hover:underline"
+                  >
+                    Open board
+                  </Link>
                 </article>
               )
             })}

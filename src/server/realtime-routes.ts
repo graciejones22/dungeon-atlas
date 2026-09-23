@@ -44,6 +44,7 @@ function wsRoute(
 }
 
 type DocsYjsRole = 'admin' | 'member' | 'viewer'
+type PartyCanvasRole = 'member' | 'viewer'
 
 interface DocumentRecordForAccess {
   ownerId?: string
@@ -120,6 +121,49 @@ async function resolveDocsYjsRole(
   return null
 }
 
+interface PartyMembershipForCanvas {
+  role?: string
+  status?: string
+}
+
+/**
+ * CanvasRooms are not record scopes, so their access policy must be resolved
+ * before the WebSocket reaches the Durable Object. A DM gets Canvas's writable
+ * `member` role; an active player gets the read-only `viewer` role.
+ */
+async function resolvePartyCanvasRole(
+  env: Env,
+  partyId: string,
+  userId: string,
+): Promise<PartyCanvasRole | null> {
+  const stub = env.RECORD_ROOMS.get(env.RECORD_ROOMS.idFromName(`app:${env.DEEPSPACE_APP_ID}`))
+  try {
+    const res = await stub.fetch(
+      new Request('https://internal/api/tools/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': env.OWNER_USER_ID,
+          'X-App-Action': 'true',
+        },
+        body: JSON.stringify({
+          tool: 'records.query',
+          params: { collection: 'team_members', where: { teamId: partyId, userId }, limit: 1 },
+        }),
+      }),
+    )
+    const json = (await res.json()) as {
+      success?: boolean
+      data?: { records?: Array<{ data?: PartyMembershipForCanvas }> }
+    }
+    const membership = json.data?.records?.[0]?.data
+    if (!json.success || membership?.status !== 'active') return null
+    return membership.role === 'dm' ? 'member' : 'viewer'
+  } catch {
+    return null
+  }
+}
+
 export function registerRealtimeRoutes(app: Hono<AppContext>): void {
   app.get(
     '/ws/:roomId',
@@ -142,13 +186,19 @@ export function registerRealtimeRoutes(app: Hono<AppContext>): void {
     return stub.fetch(roomRequest)
   })
 
-  app.get(
-    '/ws/canvas/:docId',
-    wsRoute(
-      (env) => env.CANVAS_ROOMS,
-      async (auth, env) => ({ role: await resolveAppRole(env, auth.userId) }),
-    ),
-  )
+  app.get('/ws/canvas/:docId', async (c) => {
+    const partyId = c.req.param('docId')
+    const token = new URL(c.req.url).searchParams.get('token')
+    const auth = token ? (await verifyJwt(jwtConfig(c.env), token)).result : null
+    if (!auth) return new Response('Unauthorized', { status: 401 })
+
+    const role = await resolvePartyCanvasRole(c.env, partyId, auth.userId)
+    if (!role) return new Response('Forbidden', { status: 403 })
+
+    const roomRequest = authenticatedRoomRequest(c.req.raw, auth, { role })
+    const stub = c.env.CANVAS_ROOMS.get(c.env.CANVAS_ROOMS.idFromName(partyId))
+    return stub.fetch(roomRequest)
+  })
 
   app.get(
     '/ws/presence/:scopeId',

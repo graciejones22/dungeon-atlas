@@ -19,6 +19,11 @@ test.describe('API tests', () => {
     }
   })
 
+  test('party board WebSocket requires authentication', async ({ request }) => {
+    const res = await request.get('/ws/canvas/party_1')
+    expect(res.status()).toBe(401)
+  })
+
   test('WebSocket endpoint exists', async ({ page }) => {
     // /home is a dynamic page (under src/pages/(app)/), so mounting it boots
     // the providers and auto-connects the records WebSocket. The static
