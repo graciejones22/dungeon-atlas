@@ -1,5 +1,5 @@
 import { type MouseEvent, type PointerEvent, useMemo, useState } from 'react'
-import { CircleUserRound, Hand, MapPinned, Redo2, Trash2, Undo2, Users, Waves } from 'lucide-react'
+import { CircleUserRound, Hand, MapPinned, Redo2, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { type CanvasShapeClient, useCanvas } from 'deepspace'
 import { Button, Input } from '@/components/ui'
 
@@ -7,7 +7,7 @@ const BOARD_WIDTH = 1200
 const BOARD_HEIGHT = 720
 const GRID_SIZE = 48
 
-type BoardTool = 'select' | 'token' | 'wall' | 'difficult-terrain'
+type BoardTool = 'select' | 'token' | 'enemy' | 'wall' | 'difficult-terrain'
 type ShapePosition = Pick<CanvasShapeClient, 'x' | 'y'>
 type ShapeSize = Pick<CanvasShapeClient, 'width' | 'height'>
 type TokenAppearance = { color?: string; label?: string }
@@ -15,6 +15,7 @@ type TokenAppearance = { color?: string; label?: string }
 const boardTools: Array<{ id: BoardTool; label: string; icon: typeof Hand }> = [
   { id: 'select', label: 'Select', icon: Hand },
   { id: 'token', label: 'Token', icon: CircleUserRound },
+  { id: 'enemy', label: 'Add enemy', icon: Triangle },
   { id: 'wall', label: 'Wall', icon: MapPinned },
   { id: 'difficult-terrain', label: 'Difficult terrain', icon: Waves },
 ]
@@ -32,7 +33,11 @@ function clamp(value: number, max: number): number {
 }
 
 function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElement>) {
-  const rect = event.currentTarget.getBoundingClientRect()
+  const svg = event.currentTarget instanceof SVGSVGElement
+    ? event.currentTarget
+    : event.currentTarget.ownerSVGElement
+  if (!svg) return { x: 0, y: 0 }
+  const rect = svg.getBoundingClientRect()
   return {
     x: ((event.clientX - rect.left) / rect.width) * BOARD_WIDTH,
     y: ((event.clientY - rect.top) / rect.height) * BOARD_HEIGHT,
@@ -51,7 +56,7 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
 
   const boardShapes = useMemo(
     () => [...shapes]
-      .filter((shape) => ['marker', 'token', 'wall', 'difficult-terrain'].includes(shape.type))
+      .filter((shape) => ['marker', 'token', 'enemy', 'wall', 'difficult-terrain'].includes(shape.type))
       .sort((a, b) => {
         const aIsTerrain = a.type === 'wall' || a.type === 'difficult-terrain'
         const bIsTerrain = b.type === 'wall' || b.type === 'difficult-terrain'
@@ -60,21 +65,21 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
     [shapes],
   )
   const selectedToken = boardShapes.find(
-    (shape) => shape.id === selectedShapeId && (shape.type === 'token' || shape.type === 'marker'),
+    (shape) => shape.id === selectedShapeId && ['token', 'marker', 'enemy'].includes(shape.type),
   )
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
     if (!canWrite || activeTool === 'select' || dragging || resizing) return
     const point = positionForEvent(event)
 
-    if (activeTool === 'token') {
+    if (activeTool === 'token' || activeTool === 'enemy') {
       addShape({
-        type: 'token',
+        type: activeTool,
         x: clamp(snap(point.x) - GRID_SIZE / 2, BOARD_WIDTH - GRID_SIZE),
         y: clamp(snap(point.y) - GRID_SIZE / 2, BOARD_HEIGHT - GRID_SIZE),
         width: GRID_SIZE,
         height: GRID_SIZE,
-        props: { color: '#f59e0b', label: 'T' },
+        props: activeTool === 'enemy' ? { color: '#dc2626', label: 'E' } : { color: '#f59e0b', label: 'T' },
       })
       return
     }
@@ -251,6 +256,7 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
             const isWall = shape.type === 'wall'
             const isDifficultTerrain = shape.type === 'difficult-terrain'
             const isToken = shape.type === 'token' || shape.type === 'marker'
+            const isEnemy = shape.type === 'enemy'
 
             return (
               <g
@@ -270,6 +276,19 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
                     <circle cx={position.x + size.width / 2} cy={position.y + size.height / 2} r={size.width / 2 - 3} fill={tokenAppearance?.color ?? shapeColor(shape, '#818cf8')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.45)'} strokeWidth={selected ? 3 : 1} />
                     <text x={position.x + size.width / 2} y={position.y + size.height / 2 + 6} textAnchor="middle" className="select-none fill-white text-base font-bold">
                       {(tokenAppearance?.label ?? (typeof shape.props.label === 'string' ? shape.props.label : 'T')).slice(0, 2).toUpperCase()}
+                    </text>
+                  </>
+                )}
+                {isEnemy && (
+                  <>
+                    <path
+                      d={`M ${position.x + size.width / 2} ${position.y + 3} L ${position.x + size.width - 3} ${position.y + size.height - 3} L ${position.x + 3} ${position.y + size.height - 3} Z`}
+                      fill={tokenAppearance?.color ?? shapeColor(shape, '#dc2626')}
+                      stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.45)'}
+                      strokeWidth={selected ? 3 : 1}
+                    />
+                    <text x={position.x + size.width / 2} y={position.y + size.height - 11} textAnchor="middle" className="select-none fill-white text-sm font-bold">
+                      {(tokenAppearance?.label ?? (typeof shape.props.label === 'string' ? shape.props.label : 'E')).slice(0, 2).toUpperCase()}
                     </text>
                   </>
                 )}
