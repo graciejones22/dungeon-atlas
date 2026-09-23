@@ -59,6 +59,13 @@ test.describe('Smoke tests', () => {
     })
   })
 
+  test('characters route requires sign-in when logged out', async ({ page }) => {
+    await page.goto('/characters')
+    await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeVisible({
+      timeout: 15000,
+    })
+  })
+
   test('unknown route shows 404', async ({ page }) => {
     await page.goto('/nonexistent-page-xyz')
     await waitForApp(page)
