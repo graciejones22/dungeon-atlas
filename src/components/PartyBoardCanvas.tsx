@@ -1,5 +1,5 @@
 import { type MouseEvent, type PointerEvent, useMemo, useState } from 'react'
-import { CircleUserRound, Hand, MapPinned, Redo2, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
+import { CircleUserRound, Hand, MapPinned, Redo2, RotateCw, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { type CanvasShapeClient, useCanvas } from 'deepspace'
 import { Button, Input } from '@/components/ui'
 
@@ -66,6 +66,9 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
   )
   const selectedToken = boardShapes.find(
     (shape) => shape.id === selectedShapeId && ['token', 'marker', 'enemy'].includes(shape.type),
+  )
+  const selectedTerrain = boardShapes.find(
+    (shape) => shape.id === selectedShapeId && (shape.type === 'wall' || shape.type === 'difficult-terrain'),
   )
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
@@ -159,6 +162,20 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
     updateShape(shape.id, appearance)
   }
 
+  function rotateSelectedTerrain() {
+    if (!canWrite || !selectedTerrain) return
+    const size = localSizes[selectedTerrain.id] ?? selectedTerrain
+    const position = localPositions[selectedTerrain.id] ?? selectedTerrain
+    const width = Math.min(size.height, BOARD_WIDTH)
+    const height = Math.min(size.width, BOARD_HEIGHT)
+    const x = clamp(position.x + (size.width - width) / 2, BOARD_WIDTH - width)
+    const y = clamp(position.y + (size.height - height) / 2, BOARD_HEIGHT - height)
+
+    setLocalSizes((sizes) => ({ ...sizes, [selectedTerrain.id]: { width, height } }))
+    setLocalPositions((positions) => ({ ...positions, [selectedTerrain.id]: { x, y } }))
+    resizeShape(selectedTerrain.id, width, height, x, y)
+  }
+
   function removeSelectedShape() {
     if (!canWrite || !selectedShapeId) return
     deleteShape(selectedShapeId)
@@ -186,6 +203,11 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={undo} disabled={!canWrite}><Undo2 aria-hidden /> Undo</Button>
           <Button size="sm" variant="outline" onClick={redo} disabled={!canWrite}><Redo2 aria-hidden /> Redo</Button>
+          {selectedTerrain && (
+            <Button size="sm" variant="outline" onClick={rotateSelectedTerrain} disabled={!canWrite}>
+              <RotateCw aria-hidden /> Rotate
+            </Button>
+          )}
           <Button size="sm" variant="destructive" onClick={removeSelectedShape} disabled={!canWrite || !selectedShapeId}>
             <Trash2 aria-hidden /> Remove selected
           </Button>
