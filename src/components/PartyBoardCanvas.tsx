@@ -1,7 +1,7 @@
 import { type MouseEvent, type PointerEvent, useMemo, useState } from 'react'
 import { CircleUserRound, Hand, MapPinned, Redo2, Trash2, Undo2, Users, Waves } from 'lucide-react'
 import { type CanvasShapeClient, useCanvas } from 'deepspace'
-import { Button } from '@/components/ui'
+import { Button, Input } from '@/components/ui'
 
 const BOARD_WIDTH = 1200
 const BOARD_HEIGHT = 720
@@ -9,6 +9,8 @@ const GRID_SIZE = 48
 
 type BoardTool = 'select' | 'token' | 'wall' | 'difficult-terrain'
 type ShapePosition = Pick<CanvasShapeClient, 'x' | 'y'>
+type ShapeSize = Pick<CanvasShapeClient, 'width' | 'height'>
+type TokenAppearance = { color?: string; label?: string }
 
 const boardTools: Array<{ id: BoardTool; label: string; icon: typeof Hand }> = [
   { id: 'select', label: 'Select', icon: Hand },
@@ -38,11 +40,14 @@ function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElemen
 }
 
 export function PartyBoardCanvas({ partyId }: { partyId: string }) {
-  const { shapes, viewports, connected, canWrite, addShape, moveShape, deleteShape, undo, redo } = useCanvas(partyId)
+  const { shapes, viewports, connected, canWrite, addShape, moveShape, resizeShape, updateShape, deleteShape, undo, redo } = useCanvas(partyId)
   const [activeTool, setActiveTool] = useState<BoardTool>('select')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [localPositions, setLocalPositions] = useState<Record<string, ShapePosition>>({})
+  const [localSizes, setLocalSizes] = useState<Record<string, ShapeSize>>({})
+  const [localTokenAppearances, setLocalTokenAppearances] = useState<Record<string, TokenAppearance>>({})
   const [dragging, setDragging] = useState<{ shapeId: string; offsetX: number; offsetY: number } | null>(null)
+  const [resizing, setResizing] = useState<{ shapeId: string } | null>(null)
 
   const boardShapes = useMemo(
     () => [...shapes]
@@ -54,9 +59,12 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
       }),
     [shapes],
   )
+  const selectedToken = boardShapes.find(
+    (shape) => shape.id === selectedShapeId && (shape.type === 'token' || shape.type === 'marker'),
+  )
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
-    if (!canWrite || activeTool === 'select' || dragging) return
+    if (!canWrite || activeTool === 'select' || dragging || resizing) return
     const point = positionForEvent(event)
 
     if (activeTool === 'token') {
@@ -89,24 +97,61 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
     const position = localPositions[shape.id] ?? shape
     const point = positionForEvent(event)
     event.currentTarget.setPointerCapture(event.pointerId)
+    setResizing(null)
     setDragging({ shapeId: shape.id, offsetX: point.x - position.x, offsetY: point.y - position.y })
   }
 
+  function startResize(event: PointerEvent<SVGRectElement>, shape: CanvasShapeClient) {
+    event.stopPropagation()
+    if (!canWrite) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setSelectedShapeId(shape.id)
+    setDragging(null)
+    setResizing({ shapeId: shape.id })
+  }
+
   function moveSelectedShape(event: PointerEvent<SVGSVGElement>) {
-    if (!dragging || !canWrite) return
-    const shape = shapes.find(({ id }) => id === dragging.shapeId)
+    if ((!dragging && !resizing) || !canWrite) return
+    const activeShapeId = dragging?.shapeId ?? resizing?.shapeId
+    const shape = shapes.find(({ id }) => id === activeShapeId)
     if (!shape) return
     const point = positionForEvent(event)
-    const x = clamp(snap(point.x - dragging.offsetX), BOARD_WIDTH - shape.width)
-    const y = clamp(snap(point.y - dragging.offsetY), BOARD_HEIGHT - shape.height)
+
+    if (resizing) {
+      const position = localPositions[shape.id] ?? shape
+      const width = Math.max(GRID_SIZE / 2, Math.min(point.x - position.x, BOARD_WIDTH - position.x))
+      const height = Math.max(GRID_SIZE / 2, Math.min(point.y - position.y, BOARD_HEIGHT - position.y))
+      setLocalSizes((sizes) => ({ ...sizes, [shape.id]: { width, height } }))
+      return
+    }
+
+    const size = localSizes[shape.id] ?? shape
+    const x = clamp(point.x - dragging!.offsetX, BOARD_WIDTH - size.width)
+    const y = clamp(point.y - dragging!.offsetY, BOARD_HEIGHT - size.height)
     setLocalPositions((positions) => ({ ...positions, [shape.id]: { x, y } }))
   }
 
-  function finishMove() {
-    if (!dragging || !canWrite) return
-    const position = localPositions[dragging.shapeId]
-    if (position) moveShape(dragging.shapeId, position.x, position.y)
+  function finishInteraction() {
+    if (!canWrite) return
+    if (resizing) {
+      const size = localSizes[resizing.shapeId]
+      if (size) resizeShape(resizing.shapeId, size.width, size.height)
+      setResizing(null)
+    }
+    if (dragging) {
+      const position = localPositions[dragging.shapeId]
+      if (position) moveShape(dragging.shapeId, position.x, position.y)
+    }
     setDragging(null)
+  }
+
+  function changeTokenAppearance(shape: CanvasShapeClient, appearance: TokenAppearance) {
+    if (!canWrite) return
+    setLocalTokenAppearances((appearances) => ({
+      ...appearances,
+      [shape.id]: { ...appearances[shape.id], ...appearance },
+    }))
+    updateShape(shape.id, appearance)
   }
 
   function removeSelectedShape() {
@@ -114,6 +159,10 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
     deleteShape(selectedShapeId)
     setLocalPositions((positions) => {
       const { [selectedShapeId]: _, ...remaining } = positions
+      return remaining
+    })
+    setLocalSizes((sizes) => {
+      const { [selectedShapeId]: _, ...remaining } = sizes
       return remaining
     })
     setSelectedShapeId(null)
@@ -149,6 +198,30 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
         </div>
       )}
 
+      {canWrite && selectedToken && (
+        <div className="grid gap-3 border-b border-border bg-card px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <label className="grid gap-1 text-sm font-medium text-foreground">
+            Token letter
+            <Input
+              value={localTokenAppearances[selectedToken.id]?.label ?? (typeof selectedToken.props.label === 'string' ? selectedToken.props.label : 'T')}
+              maxLength={2}
+              className="max-w-32 uppercase"
+              onChange={(event) => changeTokenAppearance(selectedToken, { label: event.target.value.toUpperCase() })}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-foreground">
+            Token color
+            <input
+              type="color"
+              aria-label="Token color"
+              value={localTokenAppearances[selectedToken.id]?.color ?? shapeColor(selectedToken, '#818cf8')}
+              className="h-10 w-16 cursor-pointer rounded-md border border-input bg-transparent p-1"
+              onChange={(event) => changeTokenAppearance(selectedToken, { color: event.target.value })}
+            />
+          </label>
+        </div>
+      )}
+
       <div className="relative aspect-[5/3] min-h-[360px] bg-[#12151c]">
         <svg
           viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}
@@ -157,8 +230,8 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
           aria-label={canWrite ? 'Collaborative party board with tokens and terrain.' : 'Collaborative party board. DM controls are read-only for players.'}
           onClick={createShape}
           onPointerMove={moveSelectedShape}
-          onPointerUp={finishMove}
-          onPointerCancel={finishMove}
+          onPointerUp={finishInteraction}
+          onPointerCancel={finishInteraction}
         >
           <defs>
             <pattern id="party-board-grid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
@@ -172,6 +245,8 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
           <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill="url(#party-board-grid)" />
           {boardShapes.map((shape) => {
             const position = localPositions[shape.id] ?? shape
+            const size = localSizes[shape.id] ?? shape
+            const tokenAppearance = localTokenAppearances[shape.id]
             const selected = shape.id === selectedShapeId
             const isWall = shape.type === 'wall'
             const isDifficultTerrain = shape.type === 'difficult-terrain'
@@ -185,18 +260,32 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
                 className={canWrite ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
               >
                 {isWall && (
-                  <rect x={position.x} y={position.y} width={shape.width} height={shape.height} rx="4" fill={shapeColor(shape, '#64748b')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.2)'} strokeWidth={selected ? 3 : 1} />
+                  <rect x={position.x} y={position.y} width={size.width} height={size.height} rx="4" fill={shapeColor(shape, '#64748b')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.2)'} strokeWidth={selected ? 3 : 1} />
                 )}
                 {isDifficultTerrain && (
-                  <rect x={position.x} y={position.y} width={shape.width} height={shape.height} rx="4" fill="url(#difficult-terrain)" stroke={selected ? '#ffffff' : shapeColor(shape, '#8b5cf6')} strokeWidth={selected ? 3 : 2} />
+                  <rect x={position.x} y={position.y} width={size.width} height={size.height} rx="4" fill="url(#difficult-terrain)" stroke={selected ? '#ffffff' : shapeColor(shape, '#8b5cf6')} strokeWidth={selected ? 3 : 2} />
                 )}
                 {isToken && (
                   <>
-                    <circle cx={position.x + shape.width / 2} cy={position.y + shape.height / 2} r={shape.width / 2 - 3} fill={shapeColor(shape, '#818cf8')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.45)'} strokeWidth={selected ? 3 : 1} />
-                    <text x={position.x + shape.width / 2} y={position.y + shape.height / 2 + 6} textAnchor="middle" className="select-none fill-white text-base font-bold">
-                      {typeof shape.props.label === 'string' ? shape.props.label.slice(0, 2).toUpperCase() : 'T'}
+                    <circle cx={position.x + size.width / 2} cy={position.y + size.height / 2} r={size.width / 2 - 3} fill={tokenAppearance?.color ?? shapeColor(shape, '#818cf8')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.45)'} strokeWidth={selected ? 3 : 1} />
+                    <text x={position.x + size.width / 2} y={position.y + size.height / 2 + 6} textAnchor="middle" className="select-none fill-white text-base font-bold">
+                      {(tokenAppearance?.label ?? (typeof shape.props.label === 'string' ? shape.props.label : 'T')).slice(0, 2).toUpperCase()}
                     </text>
                   </>
+                )}
+                {selected && (isWall || isDifficultTerrain) && (
+                  <rect
+                    x={position.x + size.width - 10}
+                    y={position.y + size.height - 10}
+                    width="20"
+                    height="20"
+                    rx="3"
+                    fill="#ffffff"
+                    stroke="#1f2937"
+                    strokeWidth="2"
+                    className="cursor-nwse-resize"
+                    onPointerDown={(event) => startResize(event, shape)}
+                  />
                 )}
               </g>
             )
