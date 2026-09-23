@@ -1,5 +1,12 @@
 import { mintUlid, timingSafeEqualStrings, type ActionHandler } from 'deepspace/worker'
 import type { Env } from '../../worker'
+import {
+  activeDungeonMasterCount,
+  getActivePartyMembership,
+  requireDungeonMaster,
+  type PartyMembership,
+  type PartyRole,
+} from './party-permissions'
 
 const PASSWORD_ITERATIONS = 600_000
 const PASSWORD_BYTES = 32
@@ -16,7 +23,7 @@ interface PartySecretRecord extends Record<string, unknown> {
   passwordHash: string
 }
 
-function requiredText(value: unknown, label: string, minLength: number, maxLength: number): string | null {
+function requiredText(value: unknown, minLength: number, maxLength: number): string | null {
   if (typeof value !== 'string') return null
   const text = value.trim()
   if (text.length < minLength || text.length > maxLength) return null
@@ -63,8 +70,8 @@ async function removePartyArtifacts(
 }
 
 export const createParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
-  const name = requiredText(params.name, 'Party name', 1, 80)
-  const password = requiredText(params.password, 'Password', 8, 128)
+  const name = requiredText(params.name, 1, 80)
+  const password = requiredText(params.password, 8, 128)
   if (!name) return { success: false, error: 'Party name must be between 1 and 80 characters.' }
   if (!password) return { success: false, error: 'Password must be between 8 and 128 characters.' }
 
@@ -97,8 +104,8 @@ export const createParty: ActionHandler<Env> = async ({ params, tools, userId })
 }
 
 export const joinParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
-  const joinCode = requiredText(params.joinCode, 'Party code', PARTY_CODE_BYTES * 2, PARTY_CODE_BYTES * 2)
-  const password = requiredText(params.password, 'Password', 8, 128)
+  const joinCode = requiredText(params.joinCode, PARTY_CODE_BYTES * 2, PARTY_CODE_BYTES * 2)
+  const password = requiredText(params.password, 8, 128)
   if (!joinCode || !password) return { success: false, error: 'Invalid party code or password.' }
 
   const parties = await tools.query<PartyRecord>('parties', { where: { joinCode: joinCode.toLowerCase() }, limit: 1 })
@@ -114,13 +121,24 @@ export const joinParty: ActionHandler<Env> = async ({ params, tools, userId }) =
     return { success: false, error: 'Invalid party code or password.' }
   }
 
-  const existingMembership = await tools.query('team_members', {
+  const existingMembership = await getActivePartyMembership(tools, party.data.partyId, userId)
+  if (existingMembership.found) {
+    return { success: true, data: { partyId: party.data.partyId, joined: false } }
+  }
+
+  const priorMemberships = await tools.query<PartyMembership>('team_members', {
     where: { teamId: party.data.partyId, userId },
     limit: 1,
   })
-  if (!existingMembership.success) return existingMembership
-  if (existingMembership.data.records.length > 0) {
-    return { success: true, data: { partyId: party.data.partyId, joined: false } }
+  if (!priorMemberships.success) return priorMemberships
+  const priorMembership = priorMemberships.data.records[0]
+  if (priorMembership) {
+    const rejoin = await tools.update('team_members', priorMembership.recordId, {
+      role: 'player',
+      status: 'active',
+    })
+    if (!rejoin.success) return rejoin
+    return { success: true, data: { partyId: party.data.partyId, joined: true } }
   }
 
   const membership = await tools.create('team_members', {
@@ -132,4 +150,65 @@ export const joinParty: ActionHandler<Env> = async ({ params, tools, userId }) =
   if (!membership.success) return membership
 
   return { success: true, data: { partyId: party.data.partyId, joined: true } }
+}
+
+function partyIdFrom(params: Record<string, unknown>): string | null {
+  return requiredText(params.partyId, 1, 64)
+}
+
+function userIdFrom(params: Record<string, unknown>): string | null {
+  return requiredText(params.userId, 1, 128)
+}
+
+function roleFrom(params: Record<string, unknown>): PartyRole | null {
+  return params.role === 'dm' || params.role === 'player' ? params.role : null
+}
+
+export const setPartyMemberRole: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const memberUserId = userIdFrom(params)
+  const role = roleFrom(params)
+  if (!partyId || !memberUserId || !role) return { success: false, error: 'Invalid party role request.' }
+
+  const actor = await requireDungeonMaster(tools, partyId, userId)
+  if (!actor.found) return { success: false, error: actor.error }
+
+  const target = await getActivePartyMembership(tools, partyId, memberUserId)
+  if (!target.found) return { success: false, error: target.error }
+  if (target.membership.data.role === role) return { success: true, data: { partyId, userId: memberUserId, role } }
+
+  if (target.membership.data.role === 'dm' && role === 'player') {
+    const dungeonMasterCount = await activeDungeonMasterCount(tools, partyId)
+    if (dungeonMasterCount === null) return { success: false, error: 'Could not verify party roles.' }
+    if (dungeonMasterCount <= 1) {
+      return { success: false, error: 'A party must always have at least one Dungeon Master.' }
+    }
+  }
+
+  const update = await tools.update('team_members', target.membership.recordId, { role })
+  if (!update.success) return update
+  return { success: true, data: { partyId, userId: memberUserId, role } }
+}
+
+export const removePartyMember: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const memberUserId = userIdFrom(params)
+  if (!partyId || !memberUserId) return { success: false, error: 'Invalid party member request.' }
+
+  const actor = await requireDungeonMaster(tools, partyId, userId)
+  if (!actor.found) return { success: false, error: actor.error }
+
+  const target = await getActivePartyMembership(tools, partyId, memberUserId)
+  if (!target.found) return { success: false, error: target.error }
+  if (target.membership.data.role === 'dm') {
+    const dungeonMasterCount = await activeDungeonMasterCount(tools, partyId)
+    if (dungeonMasterCount === null) return { success: false, error: 'Could not verify party roles.' }
+    if (dungeonMasterCount <= 1) {
+      return { success: false, error: 'A party must always have at least one Dungeon Master.' }
+    }
+  }
+
+  const update = await tools.update('team_members', target.membership.recordId, { status: 'removed' })
+  if (!update.success) return update
+  return { success: true, data: { partyId, userId: memberUserId, status: 'removed' } }
 }

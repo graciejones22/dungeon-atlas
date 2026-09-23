@@ -7,10 +7,16 @@ test.describe('API tests', () => {
   })
 
   test('party actions require authentication', async ({ request }) => {
-    const res = await request.post('/api/actions/createParty', {
-      data: { name: 'The Silver Hand', password: 'sufficiently-long-password' },
-    })
-    expect(res.status()).toBe(401)
+    const actions = [
+      ['createParty', { name: 'The Silver Hand', password: 'sufficiently-long-password' }],
+      ['setPartyMemberRole', { partyId: 'party_1', userId: 'user_1', role: 'dm' }],
+      ['removePartyMember', { partyId: 'party_1', userId: 'user_1' }],
+    ]
+
+    for (const [action, data] of actions) {
+      const res = await request.post(`/api/actions/${action}`, { data })
+      expect(res.status()).toBe(401)
+    }
   })
 
   test('WebSocket endpoint exists', async ({ page }) => {

@@ -21,7 +21,6 @@ export const partyMembersSchema: CollectionSchema = {
       name: 'role',
       storage: 'text',
       interpretation: { kind: 'select', options: ['dm', 'player'] },
-      immutable: true,
       required: true,
     },
     {
