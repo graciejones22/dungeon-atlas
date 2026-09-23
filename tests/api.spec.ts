@@ -11,6 +11,8 @@ test.describe('API tests', () => {
       ['createParty', { name: 'The Silver Hand', password: 'sufficiently-long-password' }],
       ['setPartyMemberRole', { partyId: 'party_1', userId: 'user_1', role: 'dm' }],
       ['removePartyMember', { partyId: 'party_1', userId: 'user_1' }],
+      ['linkCharacterToParty', { partyId: 'party_1', characterId: 'character_1' }],
+      ['unlinkCharacterFromParty', { partyId: 'party_1', characterId: 'character_1' }],
     ]
 
     for (const [action, data] of actions) {

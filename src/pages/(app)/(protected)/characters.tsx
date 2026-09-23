@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react'
-import { BookOpen, Heart, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
-import { useMutations, useQuery } from 'deepspace'
+import { BookOpen, Heart, Link2, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { getAuthToken, useMutations, useQuery } from 'deepspace'
 import { Button, Input, Textarea, useToast } from '@/components/ui'
 
 const abilityNames = ['Strength', 'Dexterity', 'Constitution', 'Intelligence', 'Wisdom', 'Charisma'] as const
@@ -37,6 +37,22 @@ interface Character extends CharacterInput {
   ownerId: string
 }
 
+interface Party {
+  partyId: string
+  name: string
+}
+
+interface PartyCharacter {
+  partyId: string
+  characterId: string
+}
+
+interface ActionResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
 const emptyCharacter = (): CharacterInput => ({
   name: '',
   ancestry: '',
@@ -66,16 +82,36 @@ function numericValue(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+async function callPartyAction<T>(name: 'linkCharacterToParty' | 'unlinkCharacterFromParty', params: Record<string, string>): Promise<T> {
+  const token = await getAuthToken()
+  if (!token) throw new Error('Please sign in before linking a character.')
+
+  const response = await fetch(`/api/actions/${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(params),
+  })
+  const result = (await response.json()) as ActionResponse<T>
+  if (!response.ok || !result.success || !result.data) {
+    throw new Error(result.error ?? 'The character link could not be updated.')
+  }
+  return result.data
+}
+
 export default function CharactersPage() {
   const { records: characters, status, error: queryError } = useQuery<Character>('characters', {
     orderBy: 'updatedAt',
     orderDir: 'desc',
   })
+  const { records: parties } = useQuery<Party>('parties', { orderBy: 'name', orderDir: 'asc' })
+  const { records: partyCharacters } = useQuery<PartyCharacter>('party_characters')
   const { ready, createConfirmed, putConfirmed, removeConfirmed } = useMutations<CharacterInput>('characters')
   const { success, error } = useToast()
   const [draft, setDraft] = useState<CharacterInput>(emptyCharacter)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [selectedPartyByCharacter, setSelectedPartyByCharacter] = useState<Record<string, string>>({})
+  const [linkingCharacterId, setLinkingCharacterId] = useState<string | null>(null)
 
   function startNewCharacter() {
     setEditingId(null)
@@ -130,6 +166,35 @@ export default function CharactersPage() {
     }
   }
 
+  async function linkCharacter(recordId: string, name: string) {
+    const partyId = selectedPartyByCharacter[recordId]
+    if (!partyId) return
+    setLinkingCharacterId(recordId)
+    try {
+      await callPartyAction('linkCharacterToParty', { partyId, characterId: recordId })
+      setSelectedPartyByCharacter((selected) => ({ ...selected, [recordId]: '' }))
+      const party = parties.find((item) => item.data.partyId === partyId)
+      success('Character linked', `${name} is now part of ${party?.data.name ?? 'the party'}.`)
+    } catch (caught) {
+      error('Could not link character', caught instanceof Error ? caught.message : undefined)
+    } finally {
+      setLinkingCharacterId(null)
+    }
+  }
+
+  async function unlinkCharacter(recordId: string, partyId: string, name: string) {
+    setLinkingCharacterId(recordId)
+    try {
+      await callPartyAction('unlinkCharacterFromParty', { partyId, characterId: recordId })
+      const party = parties.find((item) => item.data.partyId === partyId)
+      success('Character unlinked', `${name} is no longer linked to ${party?.data.name ?? 'that party'}.`)
+    } catch (caught) {
+      error('Could not unlink character', caught instanceof Error ? caught.message : undefined)
+    } finally {
+      setLinkingCharacterId(null)
+    }
+  }
+
   function updateAbility(ability: AbilityName, value: string) {
     setDraft((character) => ({
       ...character,
@@ -171,6 +236,9 @@ export default function CharactersPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {characters.map((character) => {
                 const sheet = character.data
+                const characterLinks = partyCharacters.filter((link) => link.data.characterId === character.recordId)
+                const linkedPartyIds = new Set(characterLinks.map((link) => link.data.partyId))
+                const availableParties = parties.filter((party) => !linkedPartyIds.has(party.data.partyId))
                 return (
                   <article key={character.recordId} className="rounded-xl border border-border bg-card p-5 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -183,6 +251,50 @@ export default function CharactersPage() {
                     <div className="mt-5 flex items-center gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
                       <Heart className="size-4 text-destructive" aria-hidden />
                       {sheet.hitPoints.current} / {sheet.hitPoints.maximum} HP
+                    </div>
+                    <div className="mt-4 border-t border-border pt-4">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Linked parties</p>
+                      {characterLinks.length === 0 ? (
+                        <p className="mt-2 text-sm text-muted-foreground">Not linked to a party yet.</p>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {characterLinks.map((link) => {
+                            const party = parties.find((item) => item.data.partyId === link.data.partyId)
+                            if (!party) return null
+                            return (
+                              <span key={link.recordId} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground">
+                                {party.data.name}
+                                <button
+                                  type="button"
+                                  aria-label={`Unlink ${sheet.name} from ${party.data.name}`}
+                                  className="rounded-sm hover:text-destructive"
+                                  onClick={() => unlinkCharacter(character.recordId, party.data.partyId, sheet.name)}
+                                  disabled={linkingCharacterId === character.recordId}
+                                >
+                                  <X className="size-3" aria-hidden />
+                                </button>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {availableParties.length > 0 && (
+                        <div className="mt-3 flex gap-2">
+                          <select
+                            aria-label={`Link ${sheet.name} to a party`}
+                            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
+                            value={selectedPartyByCharacter[character.recordId] ?? ''}
+                            onChange={(event) => setSelectedPartyByCharacter((selected) => ({ ...selected, [character.recordId]: event.target.value }))}
+                            disabled={linkingCharacterId === character.recordId}
+                          >
+                            <option value="">Choose a party</option>
+                            {availableParties.map((party) => <option key={party.recordId} value={party.data.partyId}>{party.data.name}</option>)}
+                          </select>
+                          <Button size="sm" variant="outline" onClick={() => linkCharacter(character.recordId, sheet.name)} disabled={!selectedPartyByCharacter[character.recordId] || linkingCharacterId === character.recordId} loading={linkingCharacterId === character.recordId}>
+                            <Link2 aria-hidden /> Link
+                          </Button>
+                        </div>
+                      )}
                     </div>
                     <div className="mt-5 flex gap-2">
                       <Button size="sm" variant="outline" onClick={() => startEditing(sheet, character.recordId)}><Pencil aria-hidden /> Edit</Button>

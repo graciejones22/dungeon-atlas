@@ -23,6 +23,16 @@ interface PartySecretRecord extends Record<string, unknown> {
   passwordHash: string
 }
 
+interface CharacterOwnershipRecord extends Record<string, unknown> {
+  ownerId: string
+}
+
+interface PartyCharacterRecord extends Record<string, unknown> {
+  partyId: string
+  characterId: string
+  ownerId: string
+}
+
 function requiredText(value: unknown, minLength: number, maxLength: number): string | null {
   if (typeof value !== 'string') return null
   const text = value.trim()
@@ -211,4 +221,62 @@ export const removePartyMember: ActionHandler<Env> = async ({ params, tools, use
   const update = await tools.update('team_members', target.membership.recordId, { status: 'removed' })
   if (!update.success) return update
   return { success: true, data: { partyId, userId: memberUserId, status: 'removed' } }
+}
+
+async function requireOwnedCharacter(
+  tools: Parameters<ActionHandler<Env>>[0]['tools'],
+  characterId: string,
+  userId: string,
+) {
+  const character = await tools.get<CharacterOwnershipRecord>('characters', characterId)
+  if (!character.success) return { found: false as const, error: 'Character not found.' }
+  if (character.data.record.data.ownerId !== userId) {
+    return { found: false as const, error: 'You can only link your own characters.' }
+  }
+  return { found: true as const }
+}
+
+export const linkCharacterToParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  if (!partyId || !characterId) return { success: false, error: 'Invalid character link request.' }
+
+  const membership = await getActivePartyMembership(tools, partyId, userId)
+  if (!membership.found) return { success: false, error: membership.error }
+  const character = await requireOwnedCharacter(tools, characterId, userId)
+  if (!character.found) return { success: false, error: character.error }
+
+  const existingLinks = await tools.query<PartyCharacterRecord>('party_characters', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!existingLinks.success) return existingLinks
+  if (existingLinks.data.records.length > 0) return { success: true, data: { partyId, characterId, linked: false } }
+
+  const link = await tools.create('party_characters', { partyId, characterId, ownerId: userId })
+  if (!link.success) return link
+  return { success: true, data: { partyId, characterId, linked: true } }
+}
+
+export const unlinkCharacterFromParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  if (!partyId || !characterId) return { success: false, error: 'Invalid character link request.' }
+
+  const membership = await getActivePartyMembership(tools, partyId, userId)
+  if (!membership.found) return { success: false, error: membership.error }
+  const character = await requireOwnedCharacter(tools, characterId, userId)
+  if (!character.found) return { success: false, error: character.error }
+
+  const links = await tools.query<PartyCharacterRecord>('party_characters', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!links.success) return links
+  const link = links.data.records[0]
+  if (!link) return { success: true, data: { partyId, characterId, linked: false } }
+
+  const remove = await tools.remove('party_characters', link.recordId)
+  if (!remove.success) return remove
+  return { success: true, data: { partyId, characterId, linked: false } }
 }
