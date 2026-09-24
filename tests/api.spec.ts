@@ -13,6 +13,7 @@ test.describe('API tests', () => {
       ['removePartyMember', { partyId: 'party_1', userId: 'user_1' }],
       ['linkCharacterToParty', { partyId: 'party_1', characterId: 'character_1' }],
       ['unlinkCharacterFromParty', { partyId: 'party_1', characterId: 'character_1' }],
+      ['getPartyCharacterDetails', { partyId: 'party_1', characterId: 'character_1' }],
     ]
 
     for (const [action, data] of actions) {

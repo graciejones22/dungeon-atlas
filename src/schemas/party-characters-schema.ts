@@ -11,6 +11,7 @@ export const partyCharactersSchema: CollectionSchema = {
   columns: [
     { name: 'partyId', storage: 'text', interpretation: 'plain', immutable: true, required: true },
     { name: 'characterId', storage: 'text', interpretation: 'plain', immutable: true, required: true },
+    { name: 'characterName', storage: 'text', interpretation: 'plain', immutable: true, default: '' },
     {
       name: 'ownerId',
       storage: 'text',

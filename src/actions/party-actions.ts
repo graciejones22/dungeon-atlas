@@ -25,12 +25,22 @@ interface PartySecretRecord extends Record<string, unknown> {
 
 interface CharacterOwnershipRecord extends Record<string, unknown> {
   ownerId: string
+  name: string
+  ancestry?: string
+  className?: string
+  background?: string
+  level?: number
+  experience?: number
+  abilityScores?: unknown
+  hitPoints?: unknown
+  notes?: string
 }
 
 interface PartyCharacterRecord extends Record<string, unknown> {
   partyId: string
   characterId: string
   ownerId: string
+  characterName?: string
 }
 
 function requiredText(value: unknown, minLength: number, maxLength: number): string | null {
@@ -233,7 +243,7 @@ async function requireOwnedCharacter(
   if (character.data.record.data.ownerId !== userId) {
     return { found: false as const, error: 'You can only link your own characters.' }
   }
-  return { found: true as const }
+  return { found: true as const, character: character.data.record.data }
 }
 
 export const linkCharacterToParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
@@ -253,7 +263,12 @@ export const linkCharacterToParty: ActionHandler<Env> = async ({ params, tools, 
   if (!existingLinks.success) return existingLinks
   if (existingLinks.data.records.length > 0) return { success: true, data: { partyId, characterId, linked: false } }
 
-  const link = await tools.create('party_characters', { partyId, characterId, ownerId: userId })
+  const link = await tools.create('party_characters', {
+    partyId,
+    characterId,
+    characterName: character.character.name,
+    ownerId: userId,
+  })
   if (!link.success) return link
   return { success: true, data: { partyId, characterId, linked: true } }
 }
@@ -279,4 +294,42 @@ export const unlinkCharacterFromParty: ActionHandler<Env> = async ({ params, too
   const remove = await tools.remove('party_characters', link.recordId)
   if (!remove.success) return remove
   return { success: true, data: { partyId, characterId, linked: false } }
+}
+
+export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  if (!partyId || !characterId) return { success: false, error: 'Invalid character details request.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const links = await tools.query<PartyCharacterRecord>('party_characters', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!links.success) return links
+  const link = links.data.records[0]
+  if (!link) return { success: false, error: 'That character is not linked to this party.' }
+
+  const character = await tools.get<CharacterOwnershipRecord>('characters', characterId)
+  if (!character.success || character.data.record.data.ownerId !== link.data.ownerId) {
+    return { success: false, error: 'Character details are unavailable.' }
+  }
+
+  const sheet = character.data.record.data
+  return {
+    success: true,
+    data: {
+      name: sheet.name,
+      ancestry: sheet.ancestry ?? '',
+      className: sheet.className ?? '',
+      background: sheet.background ?? '',
+      level: sheet.level ?? 1,
+      experience: sheet.experience ?? 0,
+      abilityScores: sheet.abilityScores ?? {},
+      hitPoints: sheet.hitPoints ?? {},
+      notes: sheet.notes ?? '',
+    },
+  }
 }

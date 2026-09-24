@@ -1,4 +1,4 @@
-import { type MouseEvent, type PointerEvent, useMemo, useState } from 'react'
+import { type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
 import { CircleUserRound, Hand, MapPinned, Redo2, RotateCw, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { type CanvasShapeClient, useCanvas } from 'deepspace'
 import { Button, Input } from '@/components/ui'
@@ -44,8 +44,13 @@ function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElemen
   }
 }
 
-export function PartyBoardCanvas({ partyId }: { partyId: string }) {
-  const { shapes, viewports, connected, canWrite, addShape, moveShape, resizeShape, updateShape, deleteShape, undo, redo } = useCanvas(partyId)
+interface PartyBoardCanvasProps {
+  partyId: string
+  onAttendanceChange?: (attendance: { connected: boolean; userIds: string[] }) => void
+}
+
+export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanvasProps) {
+  const { shapes, viewports, connected, canWrite, addShape, moveShape, resizeShape, updateShape, deleteShape, setViewport, undo, redo } = useCanvas(partyId)
   const [activeTool, setActiveTool] = useState<BoardTool>('select')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [localPositions, setLocalPositions] = useState<Record<string, ShapePosition>>({})
@@ -70,6 +75,16 @@ export function PartyBoardCanvas({ partyId }: { partyId: string }) {
   const selectedTerrain = boardShapes.find(
     (shape) => shape.id === selectedShapeId && (shape.type === 'wall' || shape.type === 'difficult-terrain'),
   )
+
+  useEffect(() => {
+    if (connected) {
+      setViewport({ x: 0, y: 0, zoom: 1, width: BOARD_WIDTH, height: BOARD_HEIGHT })
+    }
+  }, [connected, setViewport])
+
+  useEffect(() => {
+    onAttendanceChange?.({ connected, userIds: [...new Set(viewports.map((viewport) => viewport.userId))] })
+  }, [connected, onAttendanceChange, viewports])
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
     if (!canWrite || activeTool === 'select' || dragging || resizing) return

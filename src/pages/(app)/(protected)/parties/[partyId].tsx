@@ -1,7 +1,9 @@
+import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Crown, Map } from 'lucide-react'
-import { useQuery } from 'deepspace'
+import { useAuthProfileReady, useQuery } from 'deepspace'
 import { PartyBoardCanvas } from '@/components/PartyBoardCanvas'
+import { PartyCharacterRoster } from '@/components/PartyCharacterRoster'
 
 interface Party {
   partyId: string
@@ -16,6 +18,7 @@ interface Membership {
 
 export default function PartyBoardPage() {
   const { partyId } = useParams()
+  const { user } = useAuthProfileReady({ requireUser: true })
   const { records: parties, status } = useQuery<Party>('parties', {
     where: partyId ? { partyId } : { partyId: '__missing__' },
     limit: 1,
@@ -25,10 +28,21 @@ export default function PartyBoardPage() {
   const membership = memberships.find(
     (record) => record.data.teamId === partyId && record.data.status === 'active',
   )
+  const [canvasAttendance, setCanvasAttendance] = useState<{ connected: boolean; userIds: string[] }>({
+    connected: false,
+    userIds: [],
+  })
+  const updateCanvasAttendance = useCallback(
+    (attendance: { connected: boolean; userIds: string[] }) => setCanvasAttendance(attendance),
+    [],
+  )
 
   if (status === 'loading') {
     return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground">Loading board…</div>
   }
+
+  const attendeeUserIds = new Set(canvasAttendance.userIds)
+  if (canvasAttendance.connected && user?.id) attendeeUserIds.add(user.id)
 
   if (!party || !partyId || !membership) {
     return (
@@ -56,7 +70,12 @@ export default function PartyBoardPage() {
           {membership.data.role === 'dm' ? 'Dungeon Master controls enabled' : 'Player view'}
         </p>
       </header>
-      <PartyBoardCanvas partyId={partyId} />
+      <PartyCharacterRoster
+        partyId={partyId}
+        isDungeonMaster={membership.data.role === 'dm'}
+        attendeeUserIds={attendeeUserIds}
+      />
+      <PartyBoardCanvas partyId={partyId} onAttendanceChange={updateCanvasAttendance} />
     </main>
   )
 }
