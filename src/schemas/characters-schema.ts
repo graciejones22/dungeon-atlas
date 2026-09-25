@@ -47,6 +47,25 @@ export const charactersSchema: CollectionSchema = {
         'notes',
       ],
     },
-    admin: { read: true, create: true, update: true, delete: true },
+    // App-level admins are regular players in DungeonAtlas too. Dungeon
+    // Master access to a linked character sheet is granted only through the
+    // party-scoped server action, never by broadening this private collection.
+    admin: {
+      read: 'own',
+      create: true,
+      update: 'own',
+      delete: 'own',
+      writableFields: [
+        'name',
+        'ancestry',
+        'className',
+        'background',
+        'level',
+        'experience',
+        'abilityScores',
+        'hitPoints',
+        'notes',
+      ],
+    },
   },
 }
