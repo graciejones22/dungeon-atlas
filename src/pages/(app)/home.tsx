@@ -1,7 +1,7 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getAuthToken, useAuthProfileReady, useQuery } from 'deepspace'
-import { Crown, DoorOpen, Plus, Shield, Trash2, Users } from 'lucide-react'
+import { Copy, Crown, DoorOpen, Plus, Shield, Trash2, Users } from 'lucide-react'
 import { Button, ConfirmModal, Input, Label, useToast } from '@/components/ui'
 
 interface Party {
@@ -116,6 +116,27 @@ export default function HomePage() {
     }
   }
 
+  async function copyPartyCode(joinCode: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(joinCode)
+      } else {
+        const input = document.createElement('textarea')
+        input.value = joinCode
+        input.style.position = 'fixed'
+        input.style.opacity = '0'
+        document.body.appendChild(input)
+        input.select()
+        const copied = document.execCommand('copy')
+        input.remove()
+        if (!copied) throw new Error('Clipboard access is unavailable.')
+      }
+      success('Party code copied', 'Paste it into the party code field to join.')
+    } catch (caught) {
+      error('Could not copy party code', caught instanceof Error ? caught.message : undefined)
+    }
+  }
+
   if (!isSignedIn) {
     return (
       <main className="mx-auto flex min-h-full max-w-5xl items-center px-6 py-16">
@@ -181,7 +202,12 @@ export default function HomePage() {
                   </div>
                   <div className="mt-6 border-t border-border pt-4">
                     <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Party code</p>
-                    <code className="mt-1 block select-all text-sm font-semibold tracking-[0.12em] text-foreground">{party.data.joinCode}</code>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <code className="select-all text-sm font-semibold tracking-[0.12em] text-foreground">{party.data.joinCode}</code>
+                      <Button size="sm" variant="outline" onClick={() => void copyPartyCode(party.data.joinCode)} aria-label={`Copy party code for ${party.data.name}`}>
+                        <Copy aria-hidden /> Copy
+                      </Button>
+                    </div>
                   </div>
                   <Link
                     to={`/parties/${party.data.partyId}`}
