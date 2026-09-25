@@ -164,7 +164,14 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   }, [characterLinks, characterToPlaceId])
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
-    if (!canManageBoard || activeTool === 'select' || dragging || draggingCharacterToken || resizing) return
+    if (!canManageBoard) return
+    if (activeTool === 'select') {
+      setSelectedShapeId(null)
+      setSelectedCharacterTokenId(null)
+      setSelectedEnemyDetails(null)
+      return
+    }
+    if (dragging || draggingCharacterToken || resizing) return
     const point = positionForEvent(event)
 
     if (activeTool === 'character') {
