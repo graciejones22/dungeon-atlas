@@ -20,6 +20,10 @@ interface PartyMembershipRecord {
   data: PartyMembership
 }
 
+interface PartyOwnerRecord extends Record<string, unknown> {
+  ownerId: string
+}
+
 export async function getActivePartyMembership(
   tools: ActionTools,
   partyId: string,
@@ -43,10 +47,15 @@ export async function requireDungeonMaster(
 ): Promise<MembershipLookup> {
   const membership = await getActivePartyMembership(tools, partyId, userId)
   if (!membership.found) return membership
-  if (membership.membership.data.role !== 'dm') {
-    return { found: false, error: 'Only a Dungeon Master can manage party roles.' }
-  }
-  return membership
+  if (membership.membership.data.role === 'dm') return membership
+
+  // Creating a party is an immutable ownership claim. Treat its creator as a
+  // DM even if a stale membership role is observed, while still requiring the
+  // active membership above so removed users cannot retain board access.
+  const party = await tools.get<PartyOwnerRecord>('parties', partyId)
+  if (party.success && party.data.record.data.ownerId === userId) return membership
+
+  return { found: false, error: 'Only a Dungeon Master can manage party roles.' }
 }
 
 export async function activeDungeonMasterCount(tools: ActionTools, partyId: string): Promise<number | null> {

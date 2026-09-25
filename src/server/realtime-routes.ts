@@ -126,6 +126,10 @@ interface PartyMembershipForCanvas {
   status?: string
 }
 
+interface PartyOwnerForCanvas {
+  ownerId?: string
+}
+
 /**
  * CanvasRooms are not record scopes, so their access policy must be resolved
  * before the WebSocket reaches the Durable Object. A DM gets Canvas's writable
@@ -158,7 +162,28 @@ async function resolvePartyCanvasRole(
     }
     const membership = json.data?.records?.[0]?.data
     if (!json.success || membership?.status !== 'active') return null
-    return membership.role === 'dm' ? 'member' : 'viewer'
+    if (membership.role === 'dm') return 'member'
+
+    const partyResponse = await stub.fetch(
+      new Request('https://internal/api/tools/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': env.OWNER_USER_ID,
+          'X-App-Action': 'true',
+        },
+        body: JSON.stringify({
+          tool: 'records.get',
+          params: { collection: 'parties', recordId: partyId },
+        }),
+      }),
+    )
+    const partyJson = (await partyResponse.json()) as {
+      success?: boolean
+      data?: { record?: { data?: PartyOwnerForCanvas } }
+    }
+    if (partyJson.success && partyJson.data?.record?.data?.ownerId === userId) return 'member'
+    return 'viewer'
   } catch {
     return null
   }

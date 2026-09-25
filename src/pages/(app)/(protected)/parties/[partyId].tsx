@@ -8,6 +8,7 @@ import { PartyCharacterRoster } from '@/components/PartyCharacterRoster'
 interface Party {
   partyId: string
   name: string
+  ownerId: string
 }
 
 interface Membership {
@@ -55,6 +56,8 @@ export default function PartyBoardPage() {
     )
   }
 
+  const isDungeonMaster = membership.data.role === 'dm' || party.data.ownerId === user?.id
+
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
       <Link to="/home" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
@@ -66,18 +69,18 @@ export default function PartyBoardPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">{party.data.name}</h1>
         </div>
         <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-          {membership.data.role === 'dm' && <Crown className="size-4 text-primary" aria-hidden />}
-          {membership.data.role === 'dm' ? 'Dungeon Master controls enabled' : 'Player view'}
+          {isDungeonMaster && <Crown className="size-4 text-primary" aria-hidden />}
+          {isDungeonMaster ? 'Dungeon Master controls enabled' : 'Player view'}
         </p>
       </header>
       <PartyCharacterRoster
         partyId={partyId}
-        isDungeonMaster={membership.data.role === 'dm'}
+        isDungeonMaster={isDungeonMaster}
         attendeeUserIds={attendeeUserIds}
       />
       <PartyBoardCanvas
         partyId={partyId}
-        isDungeonMaster={membership.data.role === 'dm'}
+        isDungeonMaster={isDungeonMaster}
         currentUserId={user?.id ?? ''}
         onAttendanceChange={updateCanvasAttendance}
       />

@@ -8,6 +8,7 @@ interface Party {
   partyId: string
   name: string
   joinCode: string
+  ownerId: string
 }
 
 interface Membership {
@@ -149,6 +150,7 @@ export default function HomePage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {parties.map((party) => {
               const role = rolesByPartyId.get(party.data.partyId) ?? 'player'
+              const isDungeonMaster = role === 'dm' || party.data.ownerId === user?.id
               return (
                 <article key={party.recordId} className="rounded-xl border border-border bg-card p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
@@ -157,8 +159,8 @@ export default function HomePage() {
                       <p className="mt-1 text-sm text-muted-foreground">Collaborative board ready</p>
                     </div>
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">
-                      {role === 'dm' && <Crown className="size-3" aria-hidden />}
-                      {role === 'dm' ? 'Dungeon Master' : 'Player'}
+                      {isDungeonMaster && <Crown className="size-3" aria-hidden />}
+                      {isDungeonMaster ? 'Dungeon Master' : 'Player'}
                     </span>
                   </div>
                   <div className="mt-6 border-t border-border pt-4">
