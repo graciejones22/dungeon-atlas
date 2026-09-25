@@ -12,6 +12,10 @@ const PASSWORD_ITERATIONS = 600_000
 const PASSWORD_BYTES = 32
 const PARTY_CODE_BYTES = 8
 const PASSWORD_SALT_BYTES = 16
+const BOARD_WIDTH = 1200
+const BOARD_HEIGHT = 720
+const TOKEN_SIZE = 48
+const CHARACTER_TOKEN_COLORS = ['#4f46e5', '#0891b2', '#059669', '#c2410c', '#9333ea', '#be123c']
 
 interface PartyRecord extends Record<string, unknown> {
   partyId: string
@@ -43,11 +47,28 @@ interface PartyCharacterRecord extends Record<string, unknown> {
   characterName?: string
 }
 
+interface PartyCharacterTokenRecord extends Record<string, unknown> {
+  partyId: string
+  characterId: string
+  ownerId: string
+}
+
 function requiredText(value: unknown, minLength: number, maxLength: number): string | null {
   if (typeof value !== 'string') return null
   const text = value.trim()
   if (text.length < minLength || text.length > maxLength) return null
   return text
+}
+
+function boardCoordinate(value: unknown, maximum: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > maximum) return null
+  return Math.round(value)
+}
+
+function colorForCharacter(characterId: string): string {
+  let value = 0
+  for (const character of characterId) value = (value * 31 + character.charCodeAt(0)) >>> 0
+  return CHARACTER_TOKEN_COLORS[value % CHARACTER_TOKEN_COLORS.length]
 }
 
 function randomHex(byteLength: number): string {
@@ -230,6 +251,13 @@ export const removePartyMember: ActionHandler<Env> = async ({ params, tools, use
 
   const update = await tools.update('team_members', target.membership.recordId, { status: 'removed' })
   if (!update.success) return update
+
+  const tokens = await tools.query<PartyCharacterTokenRecord>('party_character_tokens', {
+    where: { partyId, ownerId: memberUserId },
+  })
+  if (tokens.success) {
+    await Promise.all(tokens.data.records.map((token) => tools.remove('party_character_tokens', token.recordId)))
+  }
   return { success: true, data: { partyId, userId: memberUserId, status: 'removed' } }
 }
 
@@ -293,7 +321,110 @@ export const unlinkCharacterFromParty: ActionHandler<Env> = async ({ params, too
 
   const remove = await tools.remove('party_characters', link.recordId)
   if (!remove.success) return remove
+  const tokens = await tools.query<PartyCharacterTokenRecord>('party_character_tokens', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (tokens.success && tokens.data.records[0]) {
+    await tools.remove('party_character_tokens', tokens.data.records[0].recordId)
+  }
   return { success: true, data: { partyId, characterId, linked: false } }
+}
+
+export const placePartyCharacterToken: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  const x = boardCoordinate(params.x, BOARD_WIDTH - TOKEN_SIZE)
+  const y = boardCoordinate(params.y, BOARD_HEIGHT - TOKEN_SIZE)
+  if (!partyId || !characterId || x === null || y === null) {
+    return { success: false, error: 'Invalid character token placement.' }
+  }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const links = await tools.query<PartyCharacterRecord>('party_characters', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!links.success) return links
+  const link = links.data.records[0]
+  if (!link) return { success: false, error: 'Link this character to the party before placing their token.' }
+
+  const existing = await tools.query<PartyCharacterTokenRecord>('party_character_tokens', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!existing.success) return existing
+  const token = existing.data.records[0]
+  if (token) {
+    const update = await tools.update('party_character_tokens', token.recordId, { x, y })
+    if (!update.success) return update
+    return { success: true, data: { partyId, characterId, placed: false } }
+  }
+
+  const characterName = link.data.characterName?.trim() || 'Adventurer'
+  const create = await tools.create('party_character_tokens', {
+    partyId,
+    characterId,
+    characterName,
+    ownerId: link.data.ownerId,
+    x,
+    y,
+    color: colorForCharacter(characterId),
+    label: characterName.slice(0, 2).toUpperCase() || '?',
+  })
+  if (!create.success) return create
+  return { success: true, data: { partyId, characterId, placed: true } }
+}
+
+export const movePartyCharacterToken: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  const x = boardCoordinate(params.x, BOARD_WIDTH - TOKEN_SIZE)
+  const y = boardCoordinate(params.y, BOARD_HEIGHT - TOKEN_SIZE)
+  if (!partyId || !characterId || x === null || y === null) {
+    return { success: false, error: 'Invalid character token movement.' }
+  }
+
+  const membership = await getActivePartyMembership(tools, partyId, userId)
+  if (!membership.found) return { success: false, error: membership.error }
+
+  const tokens = await tools.query<PartyCharacterTokenRecord>('party_character_tokens', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!tokens.success) return tokens
+  const token = tokens.data.records[0]
+  if (!token) return { success: false, error: 'That character is not placed on this board.' }
+  if (membership.membership.data.role !== 'dm' && token.data.ownerId !== userId) {
+    return { success: false, error: 'You can only move your own character token.' }
+  }
+
+  const update = await tools.update('party_character_tokens', token.recordId, { x, y })
+  if (!update.success) return update
+  return { success: true, data: { partyId, characterId, x, y } }
+}
+
+export const removePartyCharacterToken: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  if (!partyId || !characterId) return { success: false, error: 'Invalid character token request.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const tokens = await tools.query<PartyCharacterTokenRecord>('party_character_tokens', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!tokens.success) return tokens
+  const token = tokens.data.records[0]
+  if (!token) return { success: true, data: { partyId, characterId, removed: false } }
+
+  const remove = await tools.remove('party_character_tokens', token.recordId)
+  if (!remove.success) return remove
+  return { success: true, data: { partyId, characterId, removed: true } }
 }
 
 export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {

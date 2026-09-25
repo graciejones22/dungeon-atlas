@@ -75,7 +75,12 @@ export default function PartyBoardPage() {
         isDungeonMaster={membership.data.role === 'dm'}
         attendeeUserIds={attendeeUserIds}
       />
-      <PartyBoardCanvas partyId={partyId} onAttendanceChange={updateCanvasAttendance} />
+      <PartyBoardCanvas
+        partyId={partyId}
+        isDungeonMaster={membership.data.role === 'dm'}
+        currentUserId={user?.id ?? ''}
+        onAttendanceChange={updateCanvasAttendance}
+      />
     </main>
   )
 }

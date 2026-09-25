@@ -15,6 +15,7 @@ import { partiesSchema } from './schemas/parties-schema'
 import { partyMembersSchema } from './schemas/party-members-schema'
 import { partySecretsSchema } from './schemas/party-secrets-schema'
 import { partyCharactersSchema } from './schemas/party-characters-schema'
+import { partyCharacterTokensSchema } from './schemas/party-character-tokens-schema'
 
 export const schemas: CollectionSchema[] = [
   usersSchema,
@@ -24,4 +25,5 @@ export const schemas: CollectionSchema[] = [
   partyMembersSchema,
   partySecretsSchema,
   partyCharactersSchema,
+  partyCharacterTokensSchema,
 ]

@@ -14,6 +14,9 @@ test.describe('API tests', () => {
       ['linkCharacterToParty', { partyId: 'party_1', characterId: 'character_1' }],
       ['unlinkCharacterFromParty', { partyId: 'party_1', characterId: 'character_1' }],
       ['getPartyCharacterDetails', { partyId: 'party_1', characterId: 'character_1' }],
+      ['placePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1', x: 0, y: 0 }],
+      ['movePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1', x: 0, y: 0 }],
+      ['removePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1' }],
     ]
 
     for (const [action, data] of actions) {

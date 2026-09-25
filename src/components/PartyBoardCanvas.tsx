@@ -1,19 +1,44 @@
 import { type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
 import { CircleUserRound, Hand, MapPinned, Redo2, RotateCw, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
-import { type CanvasShapeClient, useCanvas } from 'deepspace'
-import { Button, Input } from '@/components/ui'
+import { getAuthToken, type CanvasShapeClient, useCanvas, useQuery } from 'deepspace'
+import { Button, Input, useToast } from '@/components/ui'
 
 const BOARD_WIDTH = 1200
 const BOARD_HEIGHT = 720
 const GRID_SIZE = 48
 
-type BoardTool = 'select' | 'token' | 'enemy' | 'wall' | 'difficult-terrain'
+type BoardTool = 'select' | 'character' | 'token' | 'enemy' | 'wall' | 'difficult-terrain'
 type ShapePosition = Pick<CanvasShapeClient, 'x' | 'y'>
 type ShapeSize = Pick<CanvasShapeClient, 'width' | 'height'>
 type TokenAppearance = { color?: string; label?: string }
 
+interface PartyCharacter {
+  partyId: string
+  characterId: string
+  characterName?: string
+  ownerId: string
+}
+
+interface PartyCharacterToken {
+  partyId: string
+  characterId: string
+  characterName: string
+  ownerId: string
+  x: number
+  y: number
+  color: string
+  label: string
+}
+
+interface ActionResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
 const boardTools: Array<{ id: BoardTool; label: string; icon: typeof Hand }> = [
   { id: 'select', label: 'Select', icon: Hand },
+  { id: 'character', label: 'Character token', icon: CircleUserRound },
   { id: 'token', label: 'Token', icon: CircleUserRound },
   { id: 'enemy', label: 'Add enemy', icon: Triangle },
   { id: 'wall', label: 'Wall', icon: MapPinned },
@@ -44,20 +69,51 @@ function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElemen
   }
 }
 
+async function callPartyAction<T>(
+  action: 'placePartyCharacterToken' | 'movePartyCharacterToken' | 'removePartyCharacterToken',
+  params: Record<string, string | number>,
+): Promise<T> {
+  const token = await getAuthToken()
+  if (!token) throw new Error('Please sign in before changing a character token.')
+
+  const response = await fetch(`/api/actions/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(params),
+  })
+  const result = (await response.json()) as ActionResponse<T>
+  if (!response.ok || !result.success || !result.data) {
+    throw new Error(result.error ?? 'The character token could not be updated.')
+  }
+  return result.data
+}
+
 interface PartyBoardCanvasProps {
   partyId: string
+  isDungeonMaster: boolean
+  currentUserId: string
   onAttendanceChange?: (attendance: { connected: boolean; userIds: string[] }) => void
 }
 
-export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanvasProps) {
+export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAttendanceChange }: PartyBoardCanvasProps) {
   const { shapes, viewports, connected, canWrite, addShape, moveShape, resizeShape, updateShape, deleteShape, setViewport, undo, redo } = useCanvas(partyId)
+  const { records: characterLinks } = useQuery<PartyCharacter>('party_characters', { where: { partyId } })
+  const { records: characterTokenRecords } = useQuery<PartyCharacterToken>('party_character_tokens', { where: { partyId } })
+  const { error } = useToast()
   const [activeTool, setActiveTool] = useState<BoardTool>('select')
+  const [characterToPlaceId, setCharacterToPlaceId] = useState('')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
+  const [selectedCharacterTokenId, setSelectedCharacterTokenId] = useState<string | null>(null)
   const [localPositions, setLocalPositions] = useState<Record<string, ShapePosition>>({})
+  const [localCharacterTokenPositions, setLocalCharacterTokenPositions] = useState<Record<string, ShapePosition>>({})
   const [localSizes, setLocalSizes] = useState<Record<string, ShapeSize>>({})
   const [localTokenAppearances, setLocalTokenAppearances] = useState<Record<string, TokenAppearance>>({})
   const [dragging, setDragging] = useState<{ shapeId: string; offsetX: number; offsetY: number } | null>(null)
+  const [draggingCharacterToken, setDraggingCharacterToken] = useState<{ recordId: string; offsetX: number; offsetY: number } | null>(null)
   const [resizing, setResizing] = useState<{ shapeId: string } | null>(null)
+  const canManageBoard = isDungeonMaster && canWrite
+  const characterTokens = characterTokenRecords.map((record) => ({ recordId: record.recordId, ...record.data }))
+  const selectedCharacterToken = characterTokens.find((token) => token.recordId === selectedCharacterTokenId)
 
   const boardShapes = useMemo(
     () => [...shapes]
@@ -86,9 +142,22 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
     onAttendanceChange?.({ connected, userIds: [...new Set(viewports.map((viewport) => viewport.userId))] })
   }, [connected, onAttendanceChange, viewports])
 
+  useEffect(() => {
+    if (characterToPlaceId && characterLinks.some((link) => link.data.characterId === characterToPlaceId)) return
+    setCharacterToPlaceId(characterLinks[0]?.data.characterId ?? '')
+  }, [characterLinks, characterToPlaceId])
+
   function createShape(event: MouseEvent<SVGSVGElement>) {
-    if (!canWrite || activeTool === 'select' || dragging || resizing) return
+    if (!canManageBoard || activeTool === 'select' || dragging || draggingCharacterToken || resizing) return
     const point = positionForEvent(event)
+
+    if (activeTool === 'character') {
+      if (!characterToPlaceId) return
+      const x = clamp(snap(point.x) - GRID_SIZE / 2, BOARD_WIDTH - GRID_SIZE)
+      const y = clamp(snap(point.y) - GRID_SIZE / 2, BOARD_HEIGHT - GRID_SIZE)
+      void placeCharacterToken(characterToPlaceId, x, y)
+      return
+    }
 
     if (activeTool === 'token' || activeTool === 'enemy') {
       addShape({
@@ -115,7 +184,8 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
   function selectShape(event: PointerEvent<SVGGElement>, shape: CanvasShapeClient) {
     event.stopPropagation()
     setSelectedShapeId(shape.id)
-    if (!canWrite) return
+    setSelectedCharacterTokenId(null)
+    if (!canManageBoard) return
 
     const position = localPositions[shape.id] ?? shape
     const point = positionForEvent(event)
@@ -126,15 +196,39 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
 
   function startResize(event: PointerEvent<SVGRectElement>, shape: CanvasShapeClient) {
     event.stopPropagation()
-    if (!canWrite) return
+    if (!canManageBoard) return
     event.currentTarget.setPointerCapture(event.pointerId)
     setSelectedShapeId(shape.id)
     setDragging(null)
     setResizing({ shapeId: shape.id })
   }
 
+  function selectCharacterToken(event: PointerEvent<SVGGElement>, token: PartyCharacterToken & { recordId: string }) {
+    event.stopPropagation()
+    setSelectedCharacterTokenId(token.recordId)
+    setSelectedShapeId(null)
+    if (!isDungeonMaster && token.ownerId !== currentUserId) return
+
+    const position = localCharacterTokenPositions[token.recordId] ?? token
+    const point = positionForEvent(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDragging(null)
+    setResizing(null)
+    setDraggingCharacterToken({ recordId: token.recordId, offsetX: point.x - position.x, offsetY: point.y - position.y })
+  }
+
   function moveSelectedShape(event: PointerEvent<SVGSVGElement>) {
-    if ((!dragging && !resizing) || !canWrite) return
+    if (draggingCharacterToken) {
+      const token = characterTokens.find(({ recordId }) => recordId === draggingCharacterToken.recordId)
+      if (!token) return
+      const point = positionForEvent(event)
+      const x = clamp(snap(point.x - draggingCharacterToken.offsetX), BOARD_WIDTH - GRID_SIZE)
+      const y = clamp(snap(point.y - draggingCharacterToken.offsetY), BOARD_HEIGHT - GRID_SIZE)
+      setLocalCharacterTokenPositions((positions) => ({ ...positions, [token.recordId]: { x, y } }))
+      return
+    }
+
+    if ((!dragging && !resizing) || !canManageBoard) return
     const activeShapeId = dragging?.shapeId ?? resizing?.shapeId
     const shape = shapes.find(({ id }) => id === activeShapeId)
     if (!shape) return
@@ -155,7 +249,14 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
   }
 
   function finishInteraction() {
-    if (!canWrite) return
+    if (draggingCharacterToken) {
+      const token = characterTokens.find(({ recordId }) => recordId === draggingCharacterToken.recordId)
+      const position = localCharacterTokenPositions[draggingCharacterToken.recordId]
+      if (token && position) void moveCharacterToken(token, position)
+      setDraggingCharacterToken(null)
+      return
+    }
+    if (!canManageBoard) return
     if (resizing) {
       const size = localSizes[resizing.shapeId]
       if (size) resizeShape(resizing.shapeId, size.width, size.height)
@@ -169,7 +270,7 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
   }
 
   function changeTokenAppearance(shape: CanvasShapeClient, appearance: TokenAppearance) {
-    if (!canWrite) return
+    if (!canManageBoard) return
     setLocalTokenAppearances((appearances) => ({
       ...appearances,
       [shape.id]: { ...appearances[shape.id], ...appearance },
@@ -178,7 +279,7 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
   }
 
   function rotateSelectedTerrain() {
-    if (!canWrite || !selectedTerrain) return
+    if (!canManageBoard || !selectedTerrain) return
     const size = localSizes[selectedTerrain.id] ?? selectedTerrain
     const position = localPositions[selectedTerrain.id] ?? selectedTerrain
     const width = Math.min(size.height, BOARD_WIDTH)
@@ -192,7 +293,7 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
   }
 
   function removeSelectedShape() {
-    if (!canWrite || !selectedShapeId) return
+    if (!canManageBoard || !selectedShapeId) return
     deleteShape(selectedShapeId)
     setLocalPositions((positions) => {
       const { [selectedShapeId]: _, ...remaining } = positions
@@ -203,6 +304,44 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
       return remaining
     })
     setSelectedShapeId(null)
+  }
+
+  async function placeCharacterToken(characterId: string, x: number, y: number) {
+    try {
+      await callPartyAction('placePartyCharacterToken', { partyId, characterId, x, y })
+    } catch (caught) {
+      error('Could not place character token', caught instanceof Error ? caught.message : undefined)
+    }
+  }
+
+  async function moveCharacterToken(token: PartyCharacterToken & { recordId: string }, position: ShapePosition) {
+    try {
+      await callPartyAction('movePartyCharacterToken', {
+        partyId,
+        characterId: token.characterId,
+        x: position.x,
+        y: position.y,
+      })
+    } catch (caught) {
+      setLocalCharacterTokenPositions((positions) => {
+        const { [token.recordId]: _, ...remaining } = positions
+        return remaining
+      })
+      error('Could not move character token', caught instanceof Error ? caught.message : undefined)
+    }
+  }
+
+  async function removeSelectedCharacterToken() {
+    if (!selectedCharacterToken) return
+    try {
+      await callPartyAction('removePartyCharacterToken', {
+        partyId,
+        characterId: selectedCharacterToken.characterId,
+      })
+      setSelectedCharacterTokenId(null)
+    } catch (caught) {
+      error('Could not remove character token', caught instanceof Error ? caught.message : undefined)
+    }
   }
 
   return (
@@ -216,31 +355,53 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
           {viewports.length + 1} at the table
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={undo} disabled={!canWrite}><Undo2 aria-hidden /> Undo</Button>
-          <Button size="sm" variant="outline" onClick={redo} disabled={!canWrite}><Redo2 aria-hidden /> Redo</Button>
+          <Button size="sm" variant="outline" onClick={undo} disabled={!canManageBoard}><Undo2 aria-hidden /> Undo</Button>
+          <Button size="sm" variant="outline" onClick={redo} disabled={!canManageBoard}><Redo2 aria-hidden /> Redo</Button>
           {selectedTerrain && (
-            <Button size="sm" variant="outline" onClick={rotateSelectedTerrain} disabled={!canWrite}>
+            <Button size="sm" variant="outline" onClick={rotateSelectedTerrain} disabled={!canManageBoard}>
               <RotateCw aria-hidden /> Rotate
             </Button>
           )}
-          <Button size="sm" variant="destructive" onClick={removeSelectedShape} disabled={!canWrite || !selectedShapeId}>
+          {isDungeonMaster && selectedCharacterToken && (
+            <Button size="sm" variant="destructive" onClick={removeSelectedCharacterToken}>
+              <Trash2 aria-hidden /> Remove {selectedCharacterToken.characterName}
+            </Button>
+          )}
+          <Button size="sm" variant="destructive" onClick={removeSelectedShape} disabled={!canManageBoard || !selectedShapeId}>
             <Trash2 aria-hidden /> Remove selected
           </Button>
         </div>
       </header>
 
-      {canWrite && (
+      {canManageBoard && (
         <div className="flex flex-wrap gap-2 border-b border-border bg-muted/30 px-4 py-3" aria-label="Board tools">
           {boardTools.map(({ id, label, icon: Icon }) => (
             <Button key={id} size="sm" variant={activeTool === id ? 'default' : 'outline'} onClick={() => setActiveTool(id)} aria-pressed={activeTool === id}>
               <Icon aria-hidden /> {label}
             </Button>
           ))}
+          {activeTool === 'character' && (
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <span className="sr-only">Character to place</span>
+              <select
+                value={characterToPlaceId}
+                onChange={(event) => setCharacterToPlaceId(event.target.value)}
+                className="h-9 max-w-52 rounded-md border border-input bg-background px-3 text-sm"
+                aria-label="Character to place"
+              >
+                {characterLinks.length === 0 ? (
+                  <option value="">No linked characters</option>
+                ) : (
+                  characterLinks.map((link) => <option key={link.recordId} value={link.data.characterId}>{link.data.characterName?.trim() || 'Adventurer'}</option>)
+                )}
+              </select>
+            </label>
+          )}
           <p className="self-center text-xs text-muted-foreground">Choose a tool, then click to place. Drag objects to move them.</p>
         </div>
       )}
 
-      {canWrite && selectedToken && (
+      {canManageBoard && selectedToken && (
         <div className="grid gap-3 border-b border-border bg-card px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <label className="grid gap-1 text-sm font-medium text-foreground">
             Token letter
@@ -267,9 +428,9 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
       <div className="relative aspect-[5/3] min-h-[360px] bg-[#12151c]">
         <svg
           viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}
-          className={`absolute inset-0 size-full ${canWrite && activeTool !== 'select' ? 'cursor-crosshair' : 'cursor-default'}`}
+          className={`absolute inset-0 size-full ${canManageBoard && activeTool !== 'select' ? 'cursor-crosshair' : 'cursor-default'}`}
           role="application"
-          aria-label={canWrite ? 'Collaborative party board with tokens and terrain.' : 'Collaborative party board. DM controls are read-only for players.'}
+          aria-label={canManageBoard ? 'Collaborative party board with tokens and terrain.' : 'Collaborative party board. Drag your own character token to move it.'}
           onClick={createShape}
           onPointerMove={moveSelectedShape}
           onPointerUp={finishInteraction}
@@ -300,7 +461,7 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
                 key={shape.id}
                 onPointerDown={(event) => selectShape(event, shape)}
                 onClick={(event) => event.stopPropagation()}
-                className={canWrite ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
+                className={canManageBoard ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
               >
                 {isWall && (
                   <rect x={position.x} y={position.y} width={size.width} height={size.height} rx="4" fill={shapeColor(shape, '#64748b')} stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.2)'} strokeWidth={selected ? 3 : 1} />
@@ -346,15 +507,41 @@ export function PartyBoardCanvas({ partyId, onAttendanceChange }: PartyBoardCanv
               </g>
             )
           })}
+          {characterTokens.map((token) => {
+            const position = localCharacterTokenPositions[token.recordId] ?? token
+            const canMove = isDungeonMaster || token.ownerId === currentUserId
+            const selected = token.recordId === selectedCharacterTokenId
+            return (
+              <g
+                key={token.recordId}
+                onPointerDown={(event) => selectCharacterToken(event, token)}
+                onClick={(event) => event.stopPropagation()}
+                className={canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
+              >
+                <circle
+                  cx={position.x + GRID_SIZE / 2}
+                  cy={position.y + GRID_SIZE / 2}
+                  r={GRID_SIZE / 2 - 3}
+                  fill={token.color}
+                  stroke={selected ? '#ffffff' : 'rgba(255,255,255,0.65)'}
+                  strokeWidth={selected ? 3 : 1}
+                />
+                <text x={position.x + GRID_SIZE / 2} y={position.y + GRID_SIZE / 2 + 6} textAnchor="middle" className="select-none fill-white text-sm font-bold">
+                  {token.label.slice(0, 2).toUpperCase()}
+                </text>
+                <title>{token.characterName}{canMove ? ' — drag to move' : ''}</title>
+              </g>
+            )
+          })}
         </svg>
-        {!canWrite && connected && (
+        {!canManageBoard && connected && (
           <p className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-border bg-background/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
-            Player view — your DM controls the board.
+            Player view — drag your own character token to move it.
           </p>
         )}
-        {canWrite && boardShapes.length === 0 && (
+        {canManageBoard && boardShapes.length === 0 && characterTokens.length === 0 && (
           <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-sm text-muted-foreground">
-            Select Token, Wall, or Difficult terrain to begin building the encounter.
+            Select Character token, Token, Wall, or Difficult terrain to begin building the encounter.
           </p>
         )}
       </div>

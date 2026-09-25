@@ -5,7 +5,10 @@ import {
   getPartyCharacterDetails,
   joinParty,
   linkCharacterToParty,
+  movePartyCharacterToken,
+  placePartyCharacterToken,
   removePartyMember,
+  removePartyCharacterToken,
   setPartyMemberRole,
   unlinkCharacterFromParty,
 } from './party-actions'
@@ -18,4 +21,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
   removePartyMember,
   linkCharacterToParty,
   unlinkCharacterFromParty,
+  placePartyCharacterToken,
+  movePartyCharacterToken,
+  removePartyCharacterToken,
 }
