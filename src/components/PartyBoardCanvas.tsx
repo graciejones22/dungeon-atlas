@@ -135,9 +135,14 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
     () => [...shapes]
       .filter((shape) => ['marker', 'token', 'enemy', 'wall', 'difficult-terrain'].includes(shape.type))
       .sort((a, b) => {
-        const aIsTerrain = a.type === 'wall' || a.type === 'difficult-terrain'
-        const bIsTerrain = b.type === 'wall' || b.type === 'difficult-terrain'
-        return Number(aIsTerrain) - Number(bIsTerrain)
+        const layer = (shape: CanvasShapeClient) => {
+          if (shape.type === 'wall' || shape.type === 'difficult-terrain') return 0
+          if (shape.type === 'enemy') return 2
+          return 1
+        }
+        // Terrain is the board's base, regular tokens sit above it, and
+        // enemies remain visible above walls and difficult terrain.
+        return layer(a) - layer(b)
       }),
     [shapes],
   )
@@ -514,7 +519,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
       )}
 
       {canManageBoard && selectedToken?.type === 'enemy' && selectedEnemyDetails && (
-        <aside className="border-b border-border bg-destructive/5 px-4 py-3" aria-label="Private enemy details">
+        <aside className="border-b border-destructive/30 bg-destructive/5 px-4 py-3" aria-label="Private enemy details">
           <p className="text-xs font-medium uppercase tracking-wider text-destructive">Dungeon Master only</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h3 className="font-semibold text-foreground">{selectedEnemyDetails.name}</h3>
