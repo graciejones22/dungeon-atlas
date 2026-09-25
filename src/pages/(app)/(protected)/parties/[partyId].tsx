@@ -76,6 +76,7 @@ export default function PartyBoardPage() {
       <PartyCharacterRoster
         partyId={partyId}
         isDungeonMaster={isDungeonMaster}
+        currentUserId={user?.id ?? ''}
         attendeeUserIds={attendeeUserIds}
       />
       <PartyBoardCanvas

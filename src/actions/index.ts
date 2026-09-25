@@ -15,6 +15,7 @@ import {
   removePartyEnemyDetails,
   setPartyMemberRole,
   unlinkCharacterFromParty,
+  updatePartyCharacterHitPoints,
 } from './party-actions'
 
 export const actions: Record<string, ActionHandler<Env>> = {
@@ -32,4 +33,5 @@ export const actions: Record<string, ActionHandler<Env>> = {
   movePartyCharacterToken,
   removePartyCharacterToken,
   removePartyEnemyDetails,
+  updatePartyCharacterHitPoints,
 }

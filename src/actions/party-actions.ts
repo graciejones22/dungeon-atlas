@@ -564,8 +564,8 @@ export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, too
   const characterId = requiredText(params.characterId, 1, 128)
   if (!partyId || !characterId) return { success: false, error: 'Invalid character details request.' }
 
-  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
-  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+  const membership = await getActivePartyMembership(tools, partyId, userId)
+  if (!membership.found) return { success: false, error: membership.error }
 
   const links = await tools.query<PartyCharacterRecord>('party_characters', {
     where: { partyId, characterId },
@@ -574,6 +574,11 @@ export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, too
   if (!links.success) return links
   const link = links.data.records[0]
   if (!link) return { success: false, error: 'That character is not linked to this party.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found && link.data.ownerId !== userId) {
+    return { success: false, error: 'You can only inspect your own character.' }
+  }
 
   const character = await tools.get<CharacterOwnershipRecord>('characters', characterId)
   if (!character.success || character.data.record.data.ownerId !== link.data.ownerId) {
@@ -595,4 +600,42 @@ export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, too
       notes: sheet.notes ?? '',
     },
   }
+}
+
+export const updatePartyCharacterHitPoints: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const characterId = requiredText(params.characterId, 1, 128)
+  const current = hitPointsFrom(params.current)
+  if (!partyId || !characterId || current === null) {
+    return { success: false, error: 'Invalid character hit point update.' }
+  }
+
+  const membership = await getActivePartyMembership(tools, partyId, userId)
+  if (!membership.found) return { success: false, error: membership.error }
+
+  const links = await tools.query<PartyCharacterRecord>('party_characters', {
+    where: { partyId, characterId },
+    limit: 1,
+  })
+  if (!links.success) return links
+  const link = links.data.records[0]
+  if (!link) return { success: false, error: 'That character is not linked to this party.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found && link.data.ownerId !== userId) {
+    return { success: false, error: 'You can only update your own character hit points.' }
+  }
+
+  const character = await tools.get<CharacterOwnershipRecord>('characters', characterId)
+  if (!character.success || character.data.record.data.ownerId !== link.data.ownerId) {
+    return { success: false, error: 'Character details are unavailable.' }
+  }
+
+  const existingHitPoints = character.data.record.data.hitPoints
+  const hitPoints = typeof existingHitPoints === 'object' && existingHitPoints !== null && !Array.isArray(existingHitPoints)
+    ? { ...existingHitPoints, current }
+    : { current }
+  const update = await tools.update('characters', characterId, { hitPoints })
+  if (!update.success) return update
+  return { success: true, data: { partyId, characterId, hitPoints } }
 }
