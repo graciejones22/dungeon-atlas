@@ -1,5 +1,5 @@
 import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
-import { CircleUserRound, Hand, Heart, MapPinned, Redo2, RotateCw, Save, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
+import { CircleUserRound, Hand, Heart, MapPinned, Redo2, RotateCw, Ruler, Save, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { getAuthToken, type CanvasShapeClient, useCanvas, useQuery } from 'deepspace'
 import { Button, Input, Modal, Textarea, useToast } from '@/components/ui'
 
@@ -7,10 +7,11 @@ const BOARD_WIDTH = 1200
 const BOARD_HEIGHT = 720
 const GRID_SIZE = 48
 
-type BoardTool = 'select' | 'character' | 'token' | 'enemy' | 'wall' | 'difficult-terrain'
+type BoardTool = 'select' | 'measure' | 'character' | 'token' | 'enemy' | 'wall' | 'difficult-terrain'
 type ShapePosition = Pick<CanvasShapeClient, 'x' | 'y'>
 type ShapeSize = Pick<CanvasShapeClient, 'width' | 'height'>
 type TokenAppearance = { color?: string; label?: string }
+type Measurement = { start: ShapePosition; end: ShapePosition }
 
 interface PartyCharacter {
   partyId: string
@@ -44,6 +45,7 @@ interface EnemyDetails {
 
 const boardTools: Array<{ id: BoardTool; label: string; icon: typeof Hand }> = [
   { id: 'select', label: 'Select', icon: Hand },
+  { id: 'measure', label: 'Measure', icon: Ruler },
   { id: 'character', label: 'Character token', icon: CircleUserRound },
   { id: 'token', label: 'Token', icon: CircleUserRound },
   { id: 'enemy', label: 'Add enemy', icon: Triangle },
@@ -61,6 +63,10 @@ function snap(value: number): number {
 
 function clamp(value: number, max: number): number {
   return Math.max(0, Math.min(value, max))
+}
+
+function formatDistance(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
 function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElement>) {
@@ -130,6 +136,9 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   const [savingEnemy, setSavingEnemy] = useState(false)
   const [enemyHitPointsInput, setEnemyHitPointsInput] = useState('')
   const [savingEnemyHitPoints, setSavingEnemyHitPoints] = useState(false)
+  const [measurement, setMeasurement] = useState<Measurement | null>(null)
+  const [isMeasuring, setIsMeasuring] = useState(false)
+  const [measurementSelected, setMeasurementSelected] = useState(false)
   const canManageBoard = isDungeonMaster && canWrite
   const characterTokens = characterTokenRecords.map((record) => ({ recordId: record.recordId, ...record.data }))
   const selectedCharacterToken = characterTokens.find((token) => token.recordId === selectedCharacterTokenId)
@@ -155,6 +164,9 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   const selectedTerrain = boardShapes.find(
     (shape) => shape.id === selectedShapeId && (shape.type === 'wall' || shape.type === 'difficult-terrain'),
   )
+  const measurementSquares = measurement
+    ? Math.hypot(measurement.end.x - measurement.start.x, measurement.end.y - measurement.start.y) / GRID_SIZE
+    : 0
 
   useEffect(() => {
     if (connected) {
@@ -173,10 +185,12 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
 
   function createShape(event: MouseEvent<SVGSVGElement>) {
     if (!canManageBoard) return
+    if (activeTool === 'measure') return
     if (activeTool === 'select') {
       setSelectedShapeId(null)
       setSelectedCharacterTokenId(null)
       setSelectedEnemyDetails(null)
+      setMeasurementSelected(false)
       return
     }
     if (dragging || draggingCharacterToken || resizing) return
@@ -220,11 +234,29 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
     })
   }
 
+  function startMeasurement(event: PointerEvent<SVGSVGElement>) {
+    if (!canManageBoard || activeTool !== 'measure') return
+    event.preventDefault()
+    event.stopPropagation()
+    const point = positionForEvent(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setSelectedShapeId(null)
+    setSelectedCharacterTokenId(null)
+    setSelectedEnemyDetails(null)
+    setMeasurementSelected(false)
+    setDragging(null)
+    setDraggingCharacterToken(null)
+    setResizing(null)
+    setMeasurement({ start: point, end: point })
+    setIsMeasuring(true)
+  }
+
   function selectShape(event: PointerEvent<SVGGElement>, shape: CanvasShapeClient) {
     event.stopPropagation()
     setSelectedShapeId(shape.id)
     setSelectedCharacterTokenId(null)
     setSelectedEnemyDetails(null)
+    setMeasurementSelected(false)
     if (!canManageBoard) return
 
     if (shape.type === 'enemy') void loadEnemyDetails(shape.id)
@@ -249,6 +281,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
     event.stopPropagation()
     setSelectedCharacterTokenId(token.recordId)
     setSelectedShapeId(null)
+    setMeasurementSelected(false)
     if (!isDungeonMaster && token.ownerId !== currentUserId) return
 
     const position = localCharacterTokenPositions[token.recordId] ?? token
@@ -260,6 +293,12 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   }
 
   function moveSelectedShape(event: PointerEvent<SVGSVGElement>) {
+    if (isMeasuring) {
+      const end = positionForEvent(event)
+      setMeasurement((current) => current ? { ...current, end } : current)
+      return
+    }
+
     if (draggingCharacterToken) {
       const token = characterTokens.find(({ recordId }) => recordId === draggingCharacterToken.recordId)
       if (!token) return
@@ -291,6 +330,11 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   }
 
   function finishInteraction() {
+    if (isMeasuring) {
+      setIsMeasuring(false)
+      return
+    }
+
     if (draggingCharacterToken) {
       const token = characterTokens.find(({ recordId }) => recordId === draggingCharacterToken.recordId)
       const position = localCharacterTokenPositions[draggingCharacterToken.recordId]
@@ -335,7 +379,13 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   }
 
   function removeSelectedShape() {
-    if (!canManageBoard || !selectedShapeId) return
+    if (!canManageBoard) return
+    if (measurementSelected) {
+      setMeasurement(null)
+      setMeasurementSelected(false)
+      return
+    }
+    if (!selectedShapeId) return
     const enemyShapeId = selectedToken?.type === 'enemy' ? selectedToken.id : null
     deleteShape(selectedShapeId)
     setLocalPositions((positions) => {
@@ -349,6 +399,15 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
     setSelectedShapeId(null)
     setSelectedEnemyDetails(null)
     if (enemyShapeId) void removeEnemyDetails(enemyShapeId)
+  }
+
+  function selectMeasurement(event: PointerEvent<SVGGElement>) {
+    if (!canManageBoard || activeTool !== 'select') return
+    event.stopPropagation()
+    setSelectedShapeId(null)
+    setSelectedCharacterTokenId(null)
+    setSelectedEnemyDetails(null)
+    setMeasurementSelected(true)
   }
 
   async function placeCharacterToken(characterId: string, x: number, y: number) {
@@ -477,6 +536,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={undo} disabled={!canManageBoard}><Undo2 aria-hidden /> Undo</Button>
           <Button size="sm" variant="outline" onClick={redo} disabled={!canManageBoard}><Redo2 aria-hidden /> Redo</Button>
+          {measurement && <Button size="sm" variant="outline" onClick={() => { setMeasurement(null); setMeasurementSelected(false) }} disabled={!canManageBoard}>Clear measure</Button>}
           {selectedTerrain && (
             <Button size="sm" variant="outline" onClick={rotateSelectedTerrain} disabled={!canManageBoard}>
               <RotateCw aria-hidden /> Rotate
@@ -487,7 +547,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
               <Trash2 aria-hidden /> Remove {selectedCharacterToken.characterName}
             </Button>
           )}
-          <Button size="sm" variant="destructive" onClick={removeSelectedShape} disabled={!canManageBoard || !selectedShapeId}>
+          <Button size="sm" variant="destructive" onClick={removeSelectedShape} disabled={!canManageBoard || (!selectedShapeId && !measurementSelected)}>
             <Trash2 aria-hidden /> Remove selected
           </Button>
         </div>
@@ -517,7 +577,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
               </select>
             </label>
           )}
-          <p className="self-center text-xs text-muted-foreground">Choose a tool, then click to place. Drag objects to move them.</p>
+          <p className="self-center text-xs text-muted-foreground">{activeTool === 'measure' ? 'Drag across the board to measure distance. Measurements are visible only to you.' : 'Choose a tool, then click to place. Drag objects to move them.'}</p>
         </div>
       )}
 
@@ -579,6 +639,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
           className={`absolute inset-0 size-full ${canManageBoard && activeTool !== 'select' ? 'cursor-crosshair' : 'cursor-default'}`}
           role="application"
           aria-label={canManageBoard ? 'Collaborative party board with tokens and terrain.' : 'Collaborative party board. Drag your own character token to move it.'}
+          onPointerDownCapture={startMeasurement}
           onClick={createShape}
           onPointerMove={moveSelectedShape}
           onPointerUp={finishInteraction}
@@ -681,6 +742,32 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
               </g>
             )
           })}
+          {measurement && (
+            <g
+              className={canManageBoard && activeTool === 'select' ? 'cursor-pointer' : 'pointer-events-none'}
+              aria-label={`${formatDistance(measurementSquares)} squares, ${formatDistance(measurementSquares * 5)} feet`}
+              onPointerDown={selectMeasurement}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <line
+                x1={measurement.start.x}
+                y1={measurement.start.y}
+                x2={measurement.end.x}
+                y2={measurement.end.y}
+                stroke={measurementSelected ? '#ffffff' : '#facc15'}
+                strokeWidth={measurementSelected ? '6' : '4'}
+                strokeDasharray="10 6"
+              />
+              <circle cx={measurement.start.x} cy={measurement.start.y} r="7" fill="#facc15" stroke="#422006" strokeWidth="2" />
+              <circle cx={measurement.end.x} cy={measurement.end.y} r="7" fill="#facc15" stroke="#422006" strokeWidth="2" />
+              <g transform={`translate(${(measurement.start.x + measurement.end.x) / 2}, ${(measurement.start.y + measurement.end.y) / 2})`}>
+                <rect x="-58" y="-20" width="116" height="30" rx="6" fill="#1f2937" stroke="#facc15" strokeWidth="1.5" />
+                <text y="1" textAnchor="middle" className="select-none fill-white text-sm font-semibold">
+                  {formatDistance(measurementSquares)} sq · {formatDistance(measurementSquares * 5)} ft
+                </text>
+              </g>
+            </g>
+          )}
         </svg>
         {!canManageBoard && connected && (
           <p className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-border bg-background/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
