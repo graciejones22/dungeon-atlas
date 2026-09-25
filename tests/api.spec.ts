@@ -21,6 +21,7 @@ test.describe('API tests', () => {
       ['removePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1' }],
       ['createPartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1', name: 'Goblin', hitPoints: 7, notes: '' }],
       ['getPartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1' }],
+      ['updatePartyEnemyHitPoints', { partyId: 'party_1', shapeId: 'shape_1', hitPoints: 4 }],
       ['removePartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1' }],
     ]
 

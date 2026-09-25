@@ -1,5 +1,5 @@
 import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
-import { CircleUserRound, Hand, MapPinned, Redo2, RotateCw, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
+import { CircleUserRound, Hand, Heart, MapPinned, Redo2, RotateCw, Save, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { getAuthToken, type CanvasShapeClient, useCanvas, useQuery } from 'deepspace'
 import { Button, Input, Modal, Textarea, useToast } from '@/components/ui'
 
@@ -82,7 +82,8 @@ async function callPartyAction<T>(
     | 'removePartyCharacterToken'
     | 'createPartyEnemyDetails'
     | 'getPartyEnemyDetails'
-    | 'removePartyEnemyDetails',
+    | 'removePartyEnemyDetails'
+    | 'updatePartyEnemyHitPoints',
   params: Record<string, string | number>,
 ): Promise<T> {
   const token = await getAuthToken()
@@ -127,6 +128,8 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   const [enemyDraft, setEnemyDraft] = useState<EnemyDetails>({ name: '', hitPoints: 1, notes: '' })
   const [selectedEnemyDetails, setSelectedEnemyDetails] = useState<EnemyDetails | null>(null)
   const [savingEnemy, setSavingEnemy] = useState(false)
+  const [enemyHitPointsInput, setEnemyHitPointsInput] = useState('')
+  const [savingEnemyHitPoints, setSavingEnemyHitPoints] = useState(false)
   const canManageBoard = isDungeonMaster && canWrite
   const characterTokens = characterTokenRecords.map((record) => ({ recordId: record.recordId, ...record.data }))
   const selectedCharacterToken = characterTokens.find((token) => token.recordId === selectedCharacterTokenId)
@@ -421,11 +424,35 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
 
   async function loadEnemyDetails(shapeId: string) {
     try {
-      setSelectedEnemyDetails(await callPartyAction<EnemyDetails>('getPartyEnemyDetails', { partyId, shapeId }))
+      const details = await callPartyAction<EnemyDetails>('getPartyEnemyDetails', { partyId, shapeId })
+      setSelectedEnemyDetails(details)
+      setEnemyHitPointsInput(String(details.hitPoints))
     } catch (caught) {
       if (caught instanceof Error && caught.message !== 'No private details were saved for this enemy.') {
         error('Could not load enemy details', caught.message)
       }
+    }
+  }
+
+  async function updateEnemyHitPoints(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedShapeId || !selectedEnemyDetails || savingEnemyHitPoints) return
+    const hitPoints = Number(enemyHitPointsInput)
+    if (!Number.isInteger(hitPoints) || hitPoints < 0 || hitPoints > 100_000) return
+
+    setSavingEnemyHitPoints(true)
+    try {
+      const result = await callPartyAction<{ hitPoints: number }>('updatePartyEnemyHitPoints', {
+        partyId,
+        shapeId: selectedShapeId,
+        hitPoints,
+      })
+      setSelectedEnemyDetails((details) => details ? { ...details, hitPoints: result.hitPoints } : null)
+      setEnemyHitPointsInput(String(result.hitPoints))
+    } catch (caught) {
+      error('Could not update enemy hit points', caught instanceof Error ? caught.message : undefined)
+    } finally {
+      setSavingEnemyHitPoints(false)
     }
   }
 
@@ -523,7 +550,24 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
           <p className="text-xs font-medium uppercase tracking-wider text-destructive">Dungeon Master only</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h3 className="font-semibold text-foreground">{selectedEnemyDetails.name}</h3>
-            <p className="text-sm text-muted-foreground">{selectedEnemyDetails.hitPoints} HP</p>
+            <form onSubmit={updateEnemyHitPoints} className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                <span className="sr-only">Enemy hit points</span>
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Heart className="size-3.5 text-destructive" aria-hidden /> HP</span>
+                <Input
+                  aria-label="Enemy hit points"
+                  type="number"
+                  min="0"
+                  max="100000"
+                  value={enemyHitPointsInput}
+                  onChange={(event) => setEnemyHitPointsInput(event.target.value)}
+                  className="h-8 w-24"
+                />
+              </label>
+              <Button type="submit" size="sm" loading={savingEnemyHitPoints} disabled={savingEnemyHitPoints || !Number.isInteger(Number(enemyHitPointsInput)) || Number(enemyHitPointsInput) < 0 || Number(enemyHitPointsInput) > 100_000}>
+                <Save aria-hidden /> Save HP
+              </Button>
+            </form>
           </div>
           {selectedEnemyDetails.notes && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{selectedEnemyDetails.notes}</p>}
         </aside>

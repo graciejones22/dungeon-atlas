@@ -538,6 +538,30 @@ export const getPartyEnemyDetails: ActionHandler<Env> = async ({ params, tools, 
   }
 }
 
+export const updatePartyEnemyHitPoints: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const shapeId = requiredText(params.shapeId, 1, 128)
+  const hitPoints = hitPointsFrom(params.hitPoints)
+  if (!partyId || !shapeId || hitPoints === null) {
+    return { success: false, error: 'Invalid enemy hit point update.' }
+  }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const details = await tools.query<PartyEnemyDetailsRecord>('party_enemy_details', {
+    where: { partyId, shapeId },
+    limit: 1,
+  })
+  if (!details.success) return details
+  const enemy = details.data.records[0]
+  if (!enemy) return { success: false, error: 'No private details were saved for this enemy.' }
+
+  const update = await tools.update('party_enemy_details', enemy.recordId, { hitPoints })
+  if (!update.success) return update
+  return { success: true, data: { partyId, shapeId, hitPoints } }
+}
+
 export const removePartyEnemyDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {
   const partyId = partyIdFrom(params)
   const shapeId = requiredText(params.shapeId, 1, 128)
