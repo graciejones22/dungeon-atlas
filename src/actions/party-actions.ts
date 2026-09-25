@@ -53,6 +53,14 @@ interface PartyCharacterTokenRecord extends Record<string, unknown> {
   ownerId: string
 }
 
+interface PartyEnemyDetailsRecord extends Record<string, unknown> {
+  partyId: string
+  shapeId: string
+  name: string
+  hitPoints: number
+  notes?: string
+}
+
 function requiredText(value: unknown, minLength: number, maxLength: number): string | null {
   if (typeof value !== 'string') return null
   const text = value.trim()
@@ -63,6 +71,11 @@ function requiredText(value: unknown, minLength: number, maxLength: number): str
 function boardCoordinate(value: unknown, maximum: number): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > maximum) return null
   return Math.round(value)
+}
+
+function hitPointsFrom(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100_000) return null
+  return value
 }
 
 function colorForCharacter(characterId: string): string {
@@ -425,6 +438,81 @@ export const removePartyCharacterToken: ActionHandler<Env> = async ({ params, to
   const remove = await tools.remove('party_character_tokens', token.recordId)
   if (!remove.success) return remove
   return { success: true, data: { partyId, characterId, removed: true } }
+}
+
+export const createPartyEnemyDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const shapeId = requiredText(params.shapeId, 1, 128)
+  const name = requiredText(params.name, 1, 80)
+  const hitPoints = hitPointsFrom(params.hitPoints)
+  const notes = requiredText(params.notes ?? '', 0, 2_000)
+  if (!partyId || !shapeId || !name || hitPoints === null || notes === null) {
+    return { success: false, error: 'Invalid enemy details.' }
+  }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const existing = await tools.query<PartyEnemyDetailsRecord>('party_enemy_details', {
+    where: { partyId, shapeId },
+    limit: 1,
+  })
+  if (!existing.success) return existing
+  const current = existing.data.records[0]
+  if (current) {
+    const update = await tools.update('party_enemy_details', current.recordId, { name, hitPoints, notes })
+    if (!update.success) return update
+  } else {
+    const create = await tools.create('party_enemy_details', { partyId, shapeId, name, hitPoints, notes })
+    if (!create.success) return create
+  }
+  return { success: true, data: { partyId, shapeId, name, hitPoints, notes } }
+}
+
+export const getPartyEnemyDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const shapeId = requiredText(params.shapeId, 1, 128)
+  if (!partyId || !shapeId) return { success: false, error: 'Invalid enemy details request.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const details = await tools.query<PartyEnemyDetailsRecord>('party_enemy_details', {
+    where: { partyId, shapeId },
+    limit: 1,
+  })
+  if (!details.success) return details
+  const enemy = details.data.records[0]
+  if (!enemy) return { success: false, error: 'No private details were saved for this enemy.' }
+  return {
+    success: true,
+    data: {
+      name: enemy.data.name,
+      hitPoints: enemy.data.hitPoints,
+      notes: enemy.data.notes ?? '',
+    },
+  }
+}
+
+export const removePartyEnemyDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  const shapeId = requiredText(params.shapeId, 1, 128)
+  if (!partyId || !shapeId) return { success: false, error: 'Invalid enemy details request.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  const details = await tools.query<PartyEnemyDetailsRecord>('party_enemy_details', {
+    where: { partyId, shapeId },
+    limit: 1,
+  })
+  if (!details.success) return details
+  const enemy = details.data.records[0]
+  if (!enemy) return { success: true, data: { partyId, shapeId, removed: false } }
+
+  const remove = await tools.remove('party_enemy_details', enemy.recordId)
+  if (!remove.success) return remove
+  return { success: true, data: { partyId, shapeId, removed: true } }
 }
 
 export const getPartyCharacterDetails: ActionHandler<Env> = async ({ params, tools, userId }) => {

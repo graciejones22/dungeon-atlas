@@ -1,7 +1,7 @@
-import { type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from 'react'
 import { CircleUserRound, Hand, MapPinned, Redo2, RotateCw, Trash2, Triangle, Undo2, Users, Waves } from 'lucide-react'
 import { getAuthToken, type CanvasShapeClient, useCanvas, useQuery } from 'deepspace'
-import { Button, Input, useToast } from '@/components/ui'
+import { Button, Input, Modal, Textarea, useToast } from '@/components/ui'
 
 const BOARD_WIDTH = 1200
 const BOARD_HEIGHT = 720
@@ -34,6 +34,12 @@ interface ActionResponse<T> {
   success: boolean
   data?: T
   error?: string
+}
+
+interface EnemyDetails {
+  name: string
+  hitPoints: number
+  notes: string
 }
 
 const boardTools: Array<{ id: BoardTool; label: string; icon: typeof Hand }> = [
@@ -70,7 +76,13 @@ function positionForEvent(event: MouseEvent<SVGElement> | PointerEvent<SVGElemen
 }
 
 async function callPartyAction<T>(
-  action: 'placePartyCharacterToken' | 'movePartyCharacterToken' | 'removePartyCharacterToken',
+  action:
+    | 'placePartyCharacterToken'
+    | 'movePartyCharacterToken'
+    | 'removePartyCharacterToken'
+    | 'createPartyEnemyDetails'
+    | 'getPartyEnemyDetails'
+    | 'removePartyEnemyDetails',
   params: Record<string, string | number>,
 ): Promise<T> {
   const token = await getAuthToken()
@@ -111,6 +123,10 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
   const [dragging, setDragging] = useState<{ shapeId: string; offsetX: number; offsetY: number } | null>(null)
   const [draggingCharacterToken, setDraggingCharacterToken] = useState<{ recordId: string; offsetX: number; offsetY: number } | null>(null)
   const [resizing, setResizing] = useState<{ shapeId: string } | null>(null)
+  const [enemyDraftPosition, setEnemyDraftPosition] = useState<ShapePosition | null>(null)
+  const [enemyDraft, setEnemyDraft] = useState<EnemyDetails>({ name: '', hitPoints: 1, notes: '' })
+  const [selectedEnemyDetails, setSelectedEnemyDetails] = useState<EnemyDetails | null>(null)
+  const [savingEnemy, setSavingEnemy] = useState(false)
   const canManageBoard = isDungeonMaster && canWrite
   const characterTokens = characterTokenRecords.map((record) => ({ recordId: record.recordId, ...record.data }))
   const selectedCharacterToken = characterTokens.find((token) => token.recordId === selectedCharacterTokenId)
@@ -159,14 +175,22 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
       return
     }
 
-    if (activeTool === 'token' || activeTool === 'enemy') {
+    if (activeTool === 'enemy') {
+      setEnemyDraftPosition({
+        x: clamp(snap(point.x) - GRID_SIZE / 2, BOARD_WIDTH - GRID_SIZE),
+        y: clamp(snap(point.y) - GRID_SIZE / 2, BOARD_HEIGHT - GRID_SIZE),
+      })
+      return
+    }
+
+    if (activeTool === 'token') {
       addShape({
         type: activeTool,
         x: clamp(snap(point.x) - GRID_SIZE / 2, BOARD_WIDTH - GRID_SIZE),
         y: clamp(snap(point.y) - GRID_SIZE / 2, BOARD_HEIGHT - GRID_SIZE),
         width: GRID_SIZE,
         height: GRID_SIZE,
-        props: activeTool === 'enemy' ? { color: '#dc2626', label: 'E' } : { color: '#f59e0b', label: 'T' },
+        props: { color: '#f59e0b', label: 'T' },
       })
       return
     }
@@ -185,7 +209,10 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
     event.stopPropagation()
     setSelectedShapeId(shape.id)
     setSelectedCharacterTokenId(null)
+    setSelectedEnemyDetails(null)
     if (!canManageBoard) return
+
+    if (shape.type === 'enemy') void loadEnemyDetails(shape.id)
 
     const position = localPositions[shape.id] ?? shape
     const point = positionForEvent(event)
@@ -294,6 +321,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
 
   function removeSelectedShape() {
     if (!canManageBoard || !selectedShapeId) return
+    const enemyShapeId = selectedToken?.type === 'enemy' ? selectedToken.id : null
     deleteShape(selectedShapeId)
     setLocalPositions((positions) => {
       const { [selectedShapeId]: _, ...remaining } = positions
@@ -304,6 +332,8 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
       return remaining
     })
     setSelectedShapeId(null)
+    setSelectedEnemyDetails(null)
+    if (enemyShapeId) void removeEnemyDetails(enemyShapeId)
   }
 
   async function placeCharacterToken(characterId: string, x: number, y: number) {
@@ -341,6 +371,57 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
       setSelectedCharacterTokenId(null)
     } catch (caught) {
       error('Could not remove character token', caught instanceof Error ? caught.message : undefined)
+    }
+  }
+
+  async function placeEnemy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!enemyDraftPosition || !enemyDraft.name.trim() || savingEnemy) return
+
+    const shapeId = crypto.randomUUID()
+    const details = {
+      name: enemyDraft.name.trim(),
+      hitPoints: Math.max(0, Math.round(enemyDraft.hitPoints)),
+      notes: enemyDraft.notes.trim(),
+    }
+    setSavingEnemy(true)
+    try {
+      await callPartyAction('createPartyEnemyDetails', { partyId, shapeId, ...details })
+      addShape({
+        id: shapeId,
+        type: 'enemy',
+        x: enemyDraftPosition.x,
+        y: enemyDraftPosition.y,
+        width: GRID_SIZE,
+        height: GRID_SIZE,
+        props: { color: '#dc2626', label: 'E' },
+      })
+      setSelectedShapeId(shapeId)
+      setSelectedEnemyDetails(details)
+      setEnemyDraftPosition(null)
+      setEnemyDraft({ name: '', hitPoints: 1, notes: '' })
+    } catch (caught) {
+      error('Could not place enemy', caught instanceof Error ? caught.message : undefined)
+    } finally {
+      setSavingEnemy(false)
+    }
+  }
+
+  async function loadEnemyDetails(shapeId: string) {
+    try {
+      setSelectedEnemyDetails(await callPartyAction<EnemyDetails>('getPartyEnemyDetails', { partyId, shapeId }))
+    } catch (caught) {
+      if (caught instanceof Error && caught.message !== 'No private details were saved for this enemy.') {
+        error('Could not load enemy details', caught.message)
+      }
+    }
+  }
+
+  async function removeEnemyDetails(shapeId: string) {
+    try {
+      await callPartyAction('removePartyEnemyDetails', { partyId, shapeId })
+    } catch (caught) {
+      error('Could not remove private enemy details', caught instanceof Error ? caught.message : undefined)
     }
   }
 
@@ -423,6 +504,17 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
             />
           </label>
         </div>
+      )}
+
+      {canManageBoard && selectedToken?.type === 'enemy' && selectedEnemyDetails && (
+        <aside className="border-b border-border bg-destructive/5 px-4 py-3" aria-label="Private enemy details">
+          <p className="text-xs font-medium uppercase tracking-wider text-destructive">Dungeon Master only</p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className="font-semibold text-foreground">{selectedEnemyDetails.name}</h3>
+            <p className="text-sm text-muted-foreground">{selectedEnemyDetails.hitPoints} HP</p>
+          </div>
+          {selectedEnemyDetails.notes && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{selectedEnemyDetails.notes}</p>}
+        </aside>
       )}
 
       <div className="relative aspect-[5/3] min-h-[360px] bg-[#12151c]">
@@ -545,6 +637,59 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
           </p>
         )}
       </div>
+
+      <Modal
+        open={enemyDraftPosition !== null}
+        onClose={() => {
+          if (!savingEnemy) setEnemyDraftPosition(null)
+        }}
+        size="sm"
+      >
+        <form onSubmit={placeEnemy}>
+          <Modal.Header>
+            <Modal.Title>Add enemy</Modal.Title>
+            <Modal.Description>These details are visible only to this party’s Dungeon Masters.</Modal.Description>
+          </Modal.Header>
+          <Modal.Body>
+            <div className="grid gap-4">
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Name
+                <Input
+                  value={enemyDraft.name}
+                  onChange={(event) => setEnemyDraft((draft) => ({ ...draft, name: event.target.value }))}
+                  maxLength={80}
+                  required
+                  autoFocus
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                HP
+                <Input
+                  type="number"
+                  min="0"
+                  max="100000"
+                  value={enemyDraft.hitPoints}
+                  onChange={(event) => setEnemyDraft((draft) => ({ ...draft, hitPoints: Number(event.target.value) }))}
+                  required
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Notes
+                <Textarea
+                  value={enemyDraft.notes}
+                  onChange={(event) => setEnemyDraft((draft) => ({ ...draft, notes: event.target.value }))}
+                  maxLength={2000}
+                  rows={4}
+                />
+              </label>
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button type="button" variant="outline" onClick={() => setEnemyDraftPosition(null)} disabled={savingEnemy}>Cancel</Button>
+            <Button type="submit" disabled={savingEnemy} loading={savingEnemy}>Place enemy</Button>
+          </Modal.Footer>
+        </form>
+      </Modal>
     </section>
   )
 }

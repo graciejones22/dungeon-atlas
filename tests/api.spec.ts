@@ -17,6 +17,9 @@ test.describe('API tests', () => {
       ['placePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1', x: 0, y: 0 }],
       ['movePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1', x: 0, y: 0 }],
       ['removePartyCharacterToken', { partyId: 'party_1', characterId: 'character_1' }],
+      ['createPartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1', name: 'Goblin', hitPoints: 7, notes: '' }],
+      ['getPartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1' }],
+      ['removePartyEnemyDetails', { partyId: 'party_1', shapeId: 'shape_1' }],
     ]
 
     for (const [action, data] of actions) {
