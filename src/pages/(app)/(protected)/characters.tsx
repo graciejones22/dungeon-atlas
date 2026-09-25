@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from 'react'
-import { BookOpen, Heart, Link2, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { BookOpen, Eye, Heart, Link2, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { getAuthToken, useMutations, useQuery } from 'deepspace'
-import { Button, Input, Textarea, useToast } from '@/components/ui'
+import { Button, Input, Modal, Textarea, useToast } from '@/components/ui'
 
 const abilityNames = ['Strength', 'Dexterity', 'Constitution', 'Intelligence', 'Wisdom', 'Charisma'] as const
 type AbilityName = (typeof abilityNames)[number]
@@ -112,6 +112,7 @@ export default function CharactersPage() {
   const [saving, setSaving] = useState(false)
   const [selectedPartyByCharacter, setSelectedPartyByCharacter] = useState<Record<string, string>>({})
   const [linkingCharacterId, setLinkingCharacterId] = useState<string | null>(null)
+  const [viewingCharacter, setViewingCharacter] = useState<{ recordId: string; sheet: Character } | null>(null)
 
   function startNewCharacter() {
     setEditingId(null)
@@ -160,6 +161,7 @@ export default function CharactersPage() {
     try {
       await removeConfirmed(recordId)
       if (editingId === recordId) startNewCharacter()
+      if (viewingCharacter?.recordId === recordId) setViewingCharacter(null)
       success('Character deleted', `${name} was removed from your roster.`)
     } catch (caught) {
       error('Could not delete character', caught instanceof Error ? caught.message : undefined)
@@ -221,7 +223,7 @@ export default function CharactersPage() {
           </div>
 
           {status === 'loading' ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4">
               {[0, 1].map((index) => <div key={index} className="h-44 animate-pulse rounded-xl border border-border bg-card" />)}
             </div>
           ) : status === 'error' ? (
@@ -233,7 +235,7 @@ export default function CharactersPage() {
               <p className="mt-1 text-sm text-muted-foreground">Create your first adventurer using the sheet beside this roster.</p>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4">
               {characters.map((character) => {
                 const sheet = character.data
                 const characterLinks = partyCharacters.filter((link) => link.data.characterId === character.recordId)
@@ -296,7 +298,10 @@ export default function CharactersPage() {
                         </div>
                       )}
                     </div>
-                    <div className="mt-5 flex gap-2">
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setViewingCharacter({ recordId: character.recordId, sheet })}>
+                        <Eye aria-hidden /> View sheet
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => startEditing(sheet, character.recordId)}><Pencil aria-hidden /> Edit</Button>
                       <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => deleteCharacter(character.recordId, sheet.name)} disabled={!ready}>
                         <Trash2 aria-hidden /> Delete
@@ -382,6 +387,60 @@ export default function CharactersPage() {
           </form>
         </section>
       </div>
+
+      <Modal open={viewingCharacter !== null} onClose={() => setViewingCharacter(null)} size="md">
+        <Modal.Header>
+          <Modal.Title>{viewingCharacter?.sheet.name ?? 'Character sheet'}</Modal.Title>
+          <Modal.Description>Your private character sheet.</Modal.Description>
+        </Modal.Header>
+        {viewingCharacter && (
+          <Modal.Body>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Class & ancestry</p>
+                <p className="mt-1 text-sm text-foreground">{[viewingCharacter.sheet.ancestry, viewingCharacter.sheet.className].filter(Boolean).join(' · ') || 'Adventurer'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Level & experience</p>
+                <p className="mt-1 text-sm text-foreground">Level {viewingCharacter.sheet.level} · {viewingCharacter.sheet.experience.toLocaleString()} XP</p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Hit points</p>
+                <p className="mt-1 inline-flex items-center gap-2 text-sm text-foreground">
+                  <Heart className="size-4 text-destructive" aria-hidden />
+                  {viewingCharacter.sheet.hitPoints.current} / {viewingCharacter.sheet.hitPoints.maximum} HP
+                  {viewingCharacter.sheet.hitPoints.temporary ? ` (+${viewingCharacter.sheet.hitPoints.temporary} temp)` : ''}
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ability scores</p>
+                <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  {abilityNames.map((ability) => (
+                    <span key={ability} className="rounded-md bg-muted px-2 py-1 text-center text-xs text-foreground">
+                      {ability.slice(0, 3).toUpperCase()} {viewingCharacter.sheet.abilityScores[ability]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {viewingCharacter.sheet.background && (
+                <div className="sm:col-span-2">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Background</p>
+                  <p className="mt-1 text-sm text-foreground">{viewingCharacter.sheet.background}</p>
+                </div>
+              )}
+              {viewingCharacter.sheet.notes && (
+                <div className="sm:col-span-2">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Notes</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{viewingCharacter.sheet.notes}</p>
+                </div>
+              )}
+            </div>
+          </Modal.Body>
+        )}
+        <Modal.Footer>
+          <Button variant="outline" onClick={() => setViewingCharacter(null)}><Eye aria-hidden /> Close sheet</Button>
+        </Modal.Footer>
+      </Modal>
     </main>
   )
 }
