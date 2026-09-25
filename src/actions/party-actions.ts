@@ -8,7 +8,9 @@ import {
   type PartyRole,
 } from './party-permissions'
 
-const PASSWORD_ITERATIONS = 600_000
+// Cloudflare Workers' WebCrypto currently caps PBKDF2 at 100,000 iterations.
+// Keep this at the platform maximum so production party creation succeeds.
+const PASSWORD_ITERATIONS = 100_000
 const PASSWORD_BYTES = 32
 const PARTY_CODE_BYTES = 8
 const PASSWORD_SALT_BYTES = 16
