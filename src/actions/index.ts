@@ -3,6 +3,7 @@ import type { Env } from '../../worker'
 import {
   createParty,
   createPartyEnemyDetails,
+  deleteParty,
   getPartyCharacterDetails,
   getPartyEnemyDetails,
   joinParty,
@@ -19,6 +20,7 @@ import {
 export const actions: Record<string, ActionHandler<Env>> = {
   createParty,
   createPartyEnemyDetails,
+  deleteParty,
   getPartyCharacterDetails,
   getPartyEnemyDetails,
   joinParty,

@@ -9,6 +9,7 @@ test.describe('API tests', () => {
   test('party actions require authentication', async ({ request }) => {
     const actions = [
       ['createParty', { name: 'The Silver Hand', password: 'sufficiently-long-password' }],
+      ['deleteParty', { partyId: 'party_1' }],
       ['setPartyMemberRole', { partyId: 'party_1', userId: 'user_1', role: 'dm' }],
       ['removePartyMember', { partyId: 'party_1', userId: 'user_1' }],
       ['linkCharacterToParty', { partyId: 'party_1', characterId: 'character_1' }],

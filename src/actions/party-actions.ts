@@ -125,6 +125,21 @@ async function removePartyArtifacts(
   await tools.remove('parties', partyId)
 }
 
+async function removePartyScopedRecords(
+  tools: Parameters<ActionHandler<Env>>[0]['tools'],
+  collection: string,
+  where: Record<string, string>,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const records = await tools.query<Record<string, unknown>>(collection, { where, limit: 500 })
+  if (!records.success) return { success: false, error: records.error ?? `Could not read ${collection}.` }
+
+  for (const record of records.data.records) {
+    const remove = await tools.remove(collection, record.recordId)
+    if (!remove.success) return { success: false, error: remove.error ?? `Could not remove ${collection}.` }
+  }
+  return { success: true }
+}
+
 export const createParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
   const name = requiredText(params.name, 1, 80)
   const password = requiredText(params.password, 8, 128)
@@ -206,6 +221,33 @@ export const joinParty: ActionHandler<Env> = async ({ params, tools, userId }) =
   if (!membership.success) return membership
 
   return { success: true, data: { partyId: party.data.partyId, joined: true } }
+}
+
+export const deleteParty: ActionHandler<Env> = async ({ params, tools, userId }) => {
+  const partyId = partyIdFrom(params)
+  if (!partyId) return { success: false, error: 'Invalid party deletion request.' }
+
+  const dungeonMaster = await requireDungeonMaster(tools, partyId, userId)
+  if (!dungeonMaster.found) return { success: false, error: dungeonMaster.error }
+
+  // Delete party-scoped collaboration data, never the private characters that
+  // party members own independently. The Canvas Durable Object becomes
+  // unreachable once the party record and memberships are removed.
+  for (const [collection, where] of [
+    ['party_enemy_details', { partyId }],
+    ['party_character_tokens', { partyId }],
+    ['party_characters', { partyId }],
+    ['team_members', { teamId: partyId }],
+  ] as const) {
+    const remove = await removePartyScopedRecords(tools, collection, where)
+    if (!remove.success) return remove
+  }
+
+  const secret = await tools.remove('party_secrets', partyId)
+  if (!secret.success) return secret
+  const party = await tools.remove('parties', partyId)
+  if (!party.success) return party
+  return { success: true, data: { partyId, deleted: true } }
 }
 
 function partyIdFrom(params: Record<string, unknown>): string | null {

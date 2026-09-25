@@ -1,8 +1,8 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getAuthToken, useAuthProfileReady, useQuery } from 'deepspace'
-import { Crown, DoorOpen, Plus, Shield, Users } from 'lucide-react'
-import { Button, Input, Label, useToast } from '@/components/ui'
+import { Crown, DoorOpen, Plus, Shield, Trash2, Users } from 'lucide-react'
+import { Button, ConfirmModal, Input, Label, useToast } from '@/components/ui'
 
 interface Party {
   partyId: string
@@ -23,7 +23,7 @@ interface ActionResponse<T> {
   error?: string
 }
 
-async function callAction<T>(name: 'createParty' | 'joinParty', params: Record<string, string>): Promise<T> {
+async function callAction<T>(name: 'createParty' | 'joinParty' | 'deleteParty', params: Record<string, string>): Promise<T> {
   const token = await getAuthToken()
   if (!token) throw new Error('Please sign in before managing parties.')
 
@@ -51,6 +51,8 @@ export default function HomePage() {
   const { records: memberships } = useQuery<Membership>('team_members')
   const { success, error } = useToast()
   const [pending, setPending] = useState<'create' | 'join' | null>(null)
+  const [partyToDelete, setPartyToDelete] = useState<{ partyId: string; name: string } | null>(null)
+  const [deletingParty, setDeletingParty] = useState(false)
 
   const rolesByPartyId = useMemo(
     () =>
@@ -97,6 +99,20 @@ export default function HomePage() {
       error('Could not join party', caught instanceof Error ? caught.message : undefined)
     } finally {
       setPending(null)
+    }
+  }
+
+  async function deleteParty() {
+    if (!partyToDelete || deletingParty) return
+    setDeletingParty(true)
+    try {
+      await callAction('deleteParty', { partyId: partyToDelete.partyId })
+      success('Party deleted', `${partyToDelete.name} and its board data were removed.`)
+      setPartyToDelete(null)
+    } catch (caught) {
+      error('Could not delete party', caught instanceof Error ? caught.message : undefined)
+    } finally {
+      setDeletingParty(false)
     }
   }
 
@@ -173,6 +189,16 @@ export default function HomePage() {
                   >
                     Open board
                   </Link>
+                  {isDungeonMaster && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-3 text-destructive hover:text-destructive"
+                      onClick={() => setPartyToDelete({ partyId: party.data.partyId, name: party.data.name })}
+                    >
+                      <Trash2 aria-hidden /> Delete party
+                    </Button>
+                  )}
                 </article>
               )
             })}
@@ -223,6 +249,19 @@ export default function HomePage() {
           </Button>
         </form>
       </section>
+
+      <ConfirmModal
+        open={partyToDelete !== null}
+        onClose={() => {
+          if (!deletingParty) setPartyToDelete(null)
+        }}
+        onConfirm={deleteParty}
+        title={`Delete ${partyToDelete?.name ?? 'party'}?`}
+        description="This permanently removes the party board, memberships, links, tokens, enemy details, and join password. Members’ private character sheets are not deleted."
+        confirmText="Delete party"
+        variant="destructive"
+        loading={deletingParty}
+      />
     </main>
   )
 }
