@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useRef, useState } from 'react'
 import { BookOpen, Eye, Heart, Link2, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { getAuthToken, useMutations, useQuery } from 'deepspace'
 import { Button, Input, Modal, Textarea, useToast } from '@/components/ui'
@@ -113,10 +113,20 @@ export default function CharactersPage() {
   const [selectedPartyByCharacter, setSelectedPartyByCharacter] = useState<Record<string, string>>({})
   const [linkingCharacterId, setLinkingCharacterId] = useState<string | null>(null)
   const [viewingCharacter, setViewingCharacter] = useState<{ recordId: string; sheet: Character } | null>(null)
+  const editorRef = useRef<HTMLElement>(null)
+  const characterNameInputRef = useRef<HTMLInputElement>(null)
 
   function startNewCharacter() {
     setEditingId(null)
     setDraft(emptyCharacter())
+  }
+
+  function openNewCharacterForm() {
+    startNewCharacter()
+    requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      characterNameInputRef.current?.focus({ preventScroll: true })
+    })
   }
 
   function startEditing(character: Character, recordId: string) {
@@ -212,7 +222,7 @@ export default function CharactersPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Your characters</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Character sheets are private to you. Choose one to edit before bringing it to a party board.</p>
         </div>
-        <Button onClick={startNewCharacter} variant="outline"><Plus aria-hidden /> New character</Button>
+        <Button onClick={openNewCharacterForm} variant="outline"><Plus aria-hidden /> New character</Button>
       </header>
 
       <div className="grid gap-8 py-8 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
@@ -314,7 +324,7 @@ export default function CharactersPage() {
           )}
         </section>
 
-        <section aria-labelledby="character-editor-heading" className="h-fit rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
+        <section ref={editorRef} id="character-editor" aria-labelledby="character-editor-heading" className="h-fit scroll-mt-6 rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="character-editor-heading" className="text-lg font-semibold text-card-foreground">{editingId ? 'Edit character' : 'New character'}</h2>
@@ -327,7 +337,7 @@ export default function CharactersPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-medium text-foreground sm:col-span-2">
                 Character name
-                <Input value={draft.name} onChange={(event) => setDraft((character) => ({ ...character, name: event.target.value }))} required maxLength={80} placeholder="Ari Emberfall" />
+                <Input ref={characterNameInputRef} value={draft.name} onChange={(event) => setDraft((character) => ({ ...character, name: event.target.value }))} required maxLength={80} placeholder="Ari Emberfall" />
               </label>
               <label className="grid gap-2 text-sm font-medium text-foreground">
                 Ancestry
