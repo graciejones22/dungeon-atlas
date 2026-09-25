@@ -29,6 +29,6 @@ export const partyCharacterTokensSchema: CollectionSchema = {
     // Movement is mediated by a server action so it can require an active
     // party membership as well as ownership of the linked character.
     member: { read: 'team', create: false, update: false, delete: false },
-    admin: { read: true, create: true, update: true, delete: true },
+    admin: { read: 'team', create: false, update: false, delete: false },
   },
 }

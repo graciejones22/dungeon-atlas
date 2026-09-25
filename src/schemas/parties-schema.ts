@@ -38,6 +38,8 @@ export const partiesSchema: CollectionSchema = {
   permissions: {
     viewer: { read: false, create: false, update: false, delete: false },
     member: { read: 'team', create: false, update: false, delete: false },
-    admin: { read: true, create: true, update: true, delete: true },
+    // The app owner is an SDK admin but is not automatically a member of
+    // every DungeonAtlas party. Party actions are the only privileged path.
+    admin: { read: 'team', create: false, update: false, delete: false },
   },
 }

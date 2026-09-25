@@ -27,6 +27,6 @@ export const partyCharactersSchema: CollectionSchema = {
   permissions: {
     viewer: { read: false, create: false, update: false, delete: false },
     member: { read: 'team', create: false, update: false, delete: false },
-    admin: { read: true, create: true, update: true, delete: true },
+    admin: { read: 'team', create: false, update: false, delete: false },
   },
 }
