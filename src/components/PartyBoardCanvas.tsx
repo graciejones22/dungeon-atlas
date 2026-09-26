@@ -472,6 +472,7 @@ export function PartyBoardCanvas({ partyId, isDungeonMaster, currentUserId, onAt
       })
       setSelectedShapeId(shapeId)
       setSelectedEnemyDetails(details)
+      setEnemyHitPointsInput(String(details.hitPoints))
       setEnemyDraftPosition(null)
       setEnemyDraft({ name: '', hitPoints: 1, notes: '' })
     } catch (caught) {

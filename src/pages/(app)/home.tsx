@@ -1,6 +1,6 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getAuthToken, useAuthProfileReady, useQuery } from 'deepspace'
+import { AuthOverlay, getAuthToken, useAuthProfileReady, useQuery } from 'deepspace'
 import { Copy, Crown, DoorOpen, Plus, Shield, Trash2, Users } from 'lucide-react'
 import { Button, ConfirmModal, Input, Label, useToast } from '@/components/ui'
 
@@ -53,6 +53,7 @@ export default function HomePage() {
   const [pending, setPending] = useState<'create' | 'join' | null>(null)
   const [partyToDelete, setPartyToDelete] = useState<{ partyId: string; name: string } | null>(null)
   const [deletingParty, setDeletingParty] = useState(false)
+  const [showAuthModal, setShowAuthModal] = useState(false)
 
   const rolesByPartyId = useMemo(
     () =>
@@ -148,7 +149,11 @@ export default function HomePage() {
           <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">
             Sign in to create a party, join your adventuring group, and prepare for the shared board.
           </p>
+          <Button className="mt-7 h-12 px-6 text-base" onClick={() => setShowAuthModal(true)}>
+            Sign in to DungeonAtlas
+          </Button>
         </div>
+        {showAuthModal && <AuthOverlay onClose={() => setShowAuthModal(false)} />}
       </main>
     )
   }
