@@ -41,7 +41,6 @@ DungeonAtlas uses server-side checks for party permissions.
 - npm 11.6 or newer
 
 ### Setup
-
 ```bash
 git clone https://github.com/graciejones22/dungeon-atlas.git
 cd dungeon-atlas
@@ -50,17 +49,6 @@ npm run dev
 ```
 
 The dev server prints its local URL when it starts. Sign in with separate accounts or browser profiles to test party roles and live collaboration.
-
-## Useful commands
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start the local DeepSpace/Vite development server. |
-| `npm run validate` | Run TypeScript checks and unit tests. |
-| `npm run lint` | Run ESLint. |
-| `npm run build` | Build the Worker and client for production. |
-| `npm run test:api` | Run API and WebSocket tests. |
-| `npm run deploy` | Deploy the current checkout to DeepSpace. |
 
 ## Project structure
 
@@ -73,14 +61,3 @@ src/
   server/        Authenticated HTTP and real-time WebSocket routing
 worker.ts         Cloudflare Worker and Durable Object assembly
 ```
-
-## Security notes
-
-- Never commit passwords, API keys, JWTs, or `.dev.vars` values.
-- Party codes identify a party, but joining also requires its password.
-- If a credential is pasted into a chat, issue tracker, terminal output, or commit, revoke it and replace it immediately.
-
-## Current limitations
-
-- Canvas undo/redo covers shared canvas shapes during the active session; character tokens use separate record-backed storage and are not yet included in that history.
-- Board measurements are local to the DM who creates them and are not persisted or shared.
